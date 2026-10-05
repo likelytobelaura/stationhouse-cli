@@ -21,3 +21,12 @@ def config_dir() -> Path:
 
 def credentials_path() -> Path:
     return config_dir() / "credentials.json"
+
+
+def ollama_url() -> str:
+    """Where `explore` looks for a local model. Only ever your own machine unless you point it elsewhere."""
+    return os.environ.get("STATIONHOUSE_OLLAMA_URL", os.environ.get("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+
+
+def model() -> str:
+    return os.environ.get("STATIONHOUSE_MODEL", "qwen3.5:4b")
