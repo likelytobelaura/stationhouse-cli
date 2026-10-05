@@ -353,6 +353,10 @@ def main(argv=None):
     except (AuthError, ApiError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    except EOFError:
+        # No terminal to read from (a piped or background shell): say so, don't dump a traceback.
+        print("error: this needs a terminal to type into. Run it in a normal terminal window.", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         return 130
     return 0

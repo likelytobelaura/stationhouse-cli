@@ -21,7 +21,9 @@ def suggest(tree: dict, about: str = "", limit: int = 3) -> dict:
     """
     tasks = tree["tasks"]
     by_id = {t["taskId"]: t for t in tasks}
-    candidates = [t for t in tasks if t["available"] and not t["closed"] and not t["mine"]]
+    # `workable` is the platform's own word for "people can pick this up" (it leaves out tasks like
+    # make-account that sign-up finishes); an older server doesn't send it, so absent means yes.
+    candidates = [t for t in tasks if t["available"] and not t["closed"] and t.get("workable", True) and not t["mine"]]
     relevance: dict[str, float] = {}
     matched = True
     if about.strip():
