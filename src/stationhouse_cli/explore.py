@@ -98,7 +98,7 @@ def intent(question: str, tasks: list[dict]) -> tuple[str, list[str]]:
 
 
 def live(tasks: list[dict]) -> list[dict]:
-    return [t for t in tasks if t["available"] and not t["closed"]]
+    return [t for t in tasks if t["available"] and not t["closed"] and t.get("workable", True)]
 
 
 def render_people(task: dict) -> str:

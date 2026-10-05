@@ -25,6 +25,11 @@ TREE = {
 }
 
 
+MAKE_ACCOUNT = {"taskId": "make-account", "title": "Make an account", "parentTaskId": None, "childTaskIds": [], "summary": "",
+                "scope": [], "completionCriteria": "", "available": True, "closed": False, "workable": False, "mine": False,
+                "pendingSubtasks": [], "people": []}
+
+
 def run(capsys, *argv):
     code = cli.main(list(argv))
     out = capsys.readouterr()
@@ -311,3 +316,25 @@ def test_ask_local_drops_an_answer_that_cites_an_invented_or_no_task():
 def test_ask_local_without_ollama_returns_why_instead_of_raising():
     text, why = llm.ask_local("q", TREE["tasks"], {"scorer"}, url="http://127.0.0.1:9", model="m", timeout=2)
     assert text is None and "no local model reachable" in why
+
+
+# ---------------------------------------------------------------- tasks people don't pick up (make-account)
+
+def test_find_work_and_unclaimed_explore_skip_tasks_the_server_says_arent_workable(signed_in, api, capsys):
+    api.routes[("GET", "/api/v1/tasks")] = (200, {**TREE, "tasks": TREE["tasks"] + [MAKE_ACCOUNT]})
+    _, out, _ = run(capsys, "find-work", "--limit", "10")
+    assert "make-account" not in out and "add-question-edge" in out
+    _, out, _ = run(capsys, "explore", "--no-llm", "what is unclaimed")
+    assert "make-account" not in out and "add-question-edge" in out
+
+
+def test_an_older_server_without_the_workable_flag_still_works(tree, capsys):
+    assert "workable" not in TREE["tasks"][0]
+    _, out, _ = run(capsys, "find-work")
+    assert "Do this one: add-question-edge" in out
+
+
+def test_login_with_no_terminal_says_so_instead_of_a_traceback(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError))
+    code, _, err = run(capsys, "login")
+    assert code == 1 and "needs a terminal" in err and "Traceback" not in err
