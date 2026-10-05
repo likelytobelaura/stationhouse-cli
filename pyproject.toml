@@ -1,0 +1,28 @@
+[project]
+name = "stationhouse-cli"
+version = "0.1.0"
+description = "Station House from the terminal: see who is working on what, and claim work. Signs in with your Station House account."
+requires-python = ">=3.10"
+dependencies = [
+    "pycognito",   # SRP sign-in to the Station House Cognito pool (the password never leaves the machine)
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+stationhouse = "stationhouse_cli.cli:main"
+sth = "stationhouse_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+stationhouse_cli = ["skills/**/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
