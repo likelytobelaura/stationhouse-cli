@@ -6,7 +6,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, config
+from . import __version__, config, explore as explore_mod, llm, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -87,11 +87,25 @@ def cmd_mine(args):
     _emit(args, out, human)
 
 
+CARD_ADDED = {
+    "added": "It's on your dashboard now.",
+    "unchanged": "It was already on your dashboard.",
+    "failed": "Warning: you're on it, but I couldn't put its card on your dashboard. Add it from the website.",
+}
+CARD_REMOVED = {
+    "removed": "Taken off your dashboard.",
+    "unchanged": "It wasn't on your dashboard.",
+    "failed": "Warning: released, but I couldn't take its card off your dashboard. Remove it from the website.",
+}
+
+
 def cmd_claim(args):
     out = request("POST", "/api/v1/claims", {"taskId": args.task_id})
 
     def human(d):
         print(f"You're on {args.task_id}.")
+        if d.get("dashboard") in CARD_ADDED:
+            print(CARD_ADDED[d["dashboard"]])
         others = [p for p in d.get("people", []) if not p.get("you")]
         if others:
             print("Also working on it:")
@@ -101,7 +115,158 @@ def cmd_claim(args):
 
 def cmd_release(args):
     out = request("POST", "/api/v1/claims/release", {"taskId": args.task_id})
-    _emit(args, out, lambda d: print(f"Released {args.task_id}."))
+
+    def human(d):
+        print(f"Released {args.task_id}.")
+        if d.get("dashboard") in CARD_REMOVED:
+            print(CARD_REMOVED[d["dashboard"]])
+    _emit(args, out, human)
+
+
+def cmd_task_create(args):
+    title = " ".join(args.title)
+    out = request("POST", "/api/v1/tasks", {"parentTaskId": args.parent, "title": title, "summary": args.summary})
+
+    def human(d):
+        if d.get("created"):
+            print(f"Proposed \"{title}\" as a subtask of {args.parent}.")
+            print("An admin has to approve it. Once they do it's created, you're put on it, and it shows on your dashboard.")
+        else:
+            print(f"\"{title}\" is already proposed under {args.parent} and waiting for an admin. Nothing new was filed.")
+    _emit(args, out, human)
+
+
+def cmd_task_request(args):
+    title = " ".join(args.title)
+    body = {"title": title, "description": args.description, "projectId": args.project}
+    if args.atomic_unit:
+        body["atomicUnit"] = args.atomic_unit
+    out = request("POST", "/api/v1/tasks/request", body)
+
+    def human(d):
+        if not d.get("created"):
+            print(f"You've already requested \"{title}\". Nothing new was filed.")
+            return
+        print(f"Requested \"{title}\". The maintainers decide whether it becomes a task.")
+        if not d.get("notified"):
+            print("Warning: it's recorded, but the email to the maintainers didn't go out. Mention it to one of them.")
+    _emit(args, out, human)
+
+
+def cmd_task_proposals(args):
+    out = request("GET", "/api/v1/proposals")
+
+    def human(d):
+        rows = d.get("proposals", [])
+        if not rows:
+            print("No proposals waiting.")
+        for p in rows:
+            who = p.get("hfUsername") or "unknown"
+            via = f"PR #{p['prNum']}" if p.get("prNum") else "CLI"
+            print(f"{p['proposalId']}\n    under {p['parentTaskId']}: {p['title']}  (by {who}, {via})")
+            if p.get("summary"):
+                print(f"    {p['summary']}")
+    _emit(args, out, human)
+
+
+def cmd_task_approve(args):
+    out = request("POST", "/api/v1/proposals/approve", {"proposalId": args.proposal_id})
+
+    def human(d):
+        print(f"Created {d['taskId']}.")
+        if d.get("claimed"):
+            print("The proposer is on it" + (f"; {CARD_ADDED[d['dashboard']].lower()}" if d.get("dashboard") in CARD_ADDED else "."))
+        else:
+            print("Nobody was credited (the proposal had no Hugging Face username).")
+    _emit(args, out, human)
+
+
+def cmd_task_reject(args):
+    out = request("POST", "/api/v1/proposals/reject", {"proposalId": args.proposal_id})
+    _emit(args, out, lambda d: print("Rejected."))
+
+
+def _tree(args):
+    return request("GET", "/api/v1/tasks", query={"project": args.project})
+
+
+def _answer(question, tree, args):
+    """One question: the deterministic answer, plus the local model's words for open-ended questions."""
+    result = explore_mod.explore(question, tree)
+    by_id = {t["taskId"]: t for t in tree["tasks"]}
+    result["question"] = question
+    result["answer"], result["model"], result["modelNote"] = None, None, None
+    if result["intent"] == "search" and result["tasks"] and not args.no_llm:
+        text, why = llm.ask_local(question, result["tasks"], set(by_id), url=config.ollama_url(), model=config.model())
+        result["answer"], result["modelNote"] = text, why
+        result["model"] = config.model() if text else None
+    return result, by_id
+
+
+def _print_answer(result, by_id):
+    if result["answer"]:
+        print(f"{result['answer']}\n    (local model {result['model']}; the tasks it used are below)\n")
+    elif result["modelNote"] and "no local model" not in result["modelNote"]:
+        print(f"({result['modelNote']})\n")
+    if result["note"]:
+        print(result["note"])
+    for t in result["tasks"]:
+        print(explore_mod.render_task(t, by_id))
+
+
+def cmd_explore(args):
+    tree = _tree(args)
+    question = " ".join(args.question).strip()
+    if question:
+        result, by_id = _answer(question, tree, args)
+        _emit(args, result, lambda d: _print_answer(result, by_id))
+        return
+    if args.json:
+        raise ApiError("--json needs a question: stationhouse explore --json \"who is on scoring?\"")
+    print("Explore mode. Ask about the tasks: \"who is working on the scorer?\", \"what is unclaimed?\", "
+          "\"what is ada on?\". `refresh` reloads, `exit` quits.")
+    while True:
+        try:
+            line = input("explore> ").strip()
+        except EOFError:
+            print()
+            return
+        if line in ("exit", "quit", "q"):
+            return
+        if line == "refresh":
+            tree = _tree(args)
+            print(f"Reloaded {len(tree['tasks'])} tasks.")
+        elif line:
+            result, by_id = _answer(line, tree, args)
+            _print_answer(result, by_id)
+
+
+def cmd_find_work(args):
+    tree = _tree(args)
+    out = work.suggest(tree, " ".join(args.about), args.limit)
+    by_id = {t["taskId"]: t for t in tree["tasks"]}
+
+    def human(d):
+        picks = d["picks"]
+        if not picks:
+            print("Nothing open to pick up right now." if d["open"] == 0 else "Nothing open matches that.")
+            print("If there's work you'd like to do that isn't here: stationhouse task request \"title\" -d \"what and why\"")
+            return
+        if not d["matched"]:
+            print("Nothing matched that, so these are the open tasks that most need someone:\n")
+        first = picks[0]["task"]
+        print(f"Do this one: {first['taskId']}  {first['title']}")
+        for r in picks[0]["reasons"]:
+            print(f"  - {r}")
+        print(explore_mod.render_task(first, by_id).split("\n", 1)[1])
+        print(f"\nTo take it:  stationhouse task claim {first['taskId']}")
+        if len(picks) > 1:
+            print("\nOr:")
+            for p in picks[1:]:
+                print(f"  {p['task']['taskId']}  {p['task']['title']}  ({p['reasons'][0]})")
+    _emit(args, {"picks": [{"taskId": p["task"]["taskId"], "title": p["task"]["title"], "score": p["score"],
+                            "reasons": p["reasons"], "people": p["task"]["people"]} for p in out["picks"]],
+                 "matched": out["matched"], "open": out["open"]}, lambda _d: human(out))
 
 
 def cmd_assign(args):
@@ -125,24 +290,53 @@ def build_parser():
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    def add(name, fn, help, task=False):
-        sp = sub.add_parser(name, help=help)
+    def add(name, fn, help, task=False, under=None, aliases=()):
+        sp = (under or sub).add_parser(name, help=help, aliases=list(aliases))
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output")
         if task:
             sp.add_argument("task_id", metavar="task-id")
         sp.set_defaults(fn=fn)
         return sp
 
+    def project(sp):
+        sp.add_argument("--project", default=config.DEFAULT_PROJECT)
+        return sp
+
     add("login", cmd_login, "sign in with your Station House email").add_argument("--email")
     add("logout", cmd_logout, "forget the stored session")
     add("whoami", cmd_whoami, "who you are signed in as")
-    add("unclaimed", cmd_unclaimed, "open tasks nobody is on").add_argument("--project", default=config.DEFAULT_PROJECT)
+    project(add("unclaimed", cmd_unclaimed, "open tasks nobody is on"))
     add("who", cmd_who, "who is working on a task", task=True)
     add("mine", cmd_mine, "tasks you have claimed")
-    add("claim", cmd_claim, "claim a task (many people can share one)", task=True)
-    add("release", cmd_release, "release a task you claimed", task=True)
+    add("claim", cmd_claim, "claim a task (same as `task claim`)", task=True)
+    add("release", cmd_release, "release a task you claimed (same as `task release`)", task=True)
     a = add("assign", cmd_assign, "admins only: put someone on a task", task=True)
     a.add_argument("handle", help="their Hugging Face username")
+
+    t = sub.add_parser("task", help="claim, create or request tasks")
+    tsub = t.add_subparsers(dest="task_cmd", required=True)
+    add("claim", cmd_claim, "claim an existing task or subtask; it shows on your dashboard", task=True, under=tsub)
+    add("release", cmd_release, "release a task you claimed; it comes off your dashboard", task=True, under=tsub)
+    c = add("create", cmd_task_create, "propose a SUBTASK of an existing task (an admin approves it)", under=tsub)
+    c.add_argument("parent", metavar="parent-task-id", help="the existing task it belongs under")
+    c.add_argument("title", nargs="+")
+    c.add_argument("-s", "--summary", required=True, help="what the subtask is and when it's done")
+    r = add("request", cmd_task_request, "ask for a new top-level task that isn't a subtask of an existing one", under=tsub)
+    r.add_argument("title", nargs="+")
+    r.add_argument("-d", "--description", required=True, help="what the task is and why it's worth doing")
+    r.add_argument("--atomic-unit", help="the smallest unit of contribution someone could make")
+    r.add_argument("--project", default=config.DEFAULT_PROJECT)
+    add("proposals", cmd_task_proposals, "admins only: subtask proposals waiting for review", under=tsub)
+    for name, fn, help in (("approve", cmd_task_approve, "admins only: create the proposed subtask"),
+                           ("reject", cmd_task_reject, "admins only: decline a proposed subtask")):
+        add(name, fn, help, under=tsub).add_argument("proposal_id", metavar="proposal-id")
+
+    e = project(add("explore", cmd_explore, "ask questions about the tasks and who is on them (no question: explore mode)"))
+    e.add_argument("question", nargs="*", help="e.g. who is working on the scorer?")
+    e.add_argument("--no-llm", action="store_true", help="never use a local model, even if one is running")
+    w = project(add("find-work", cmd_find_work, "pick an open task for you to do", aliases=["work"]))
+    w.add_argument("about", nargs="*", help="what you're into, e.g. adversarial prompts")
+    w.add_argument("--limit", type=int, default=3, help="how many tasks to suggest (default 3)")
     add("skills-install", cmd_skills_install, "install the agent skill").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
     return p
 
@@ -150,9 +344,10 @@ def build_parser():
 def main(argv=None):
     import re
     args = build_parser().parse_args(argv)
-    if hasattr(args, "task_id") and not re.match(TASK_ID, args.task_id):
-        print(f"error: {args.task_id!r} isn't a valid task id", file=sys.stderr)
-        return 2
+    for attr in ("task_id", "parent"):
+        if hasattr(args, attr) and not re.match(TASK_ID, getattr(args, attr)):
+            print(f"error: {getattr(args, attr)!r} isn't a valid task id", file=sys.stderr)
+            return 2
     try:
         args.fn(args)
     except (AuthError, ApiError) as e:
