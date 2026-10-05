@@ -50,9 +50,9 @@ you to run `stationhouse login` and never to handle your password.
 ## Status
 
 The CLI is complete and tested against a fake server; real Cognito sign-in is exercised up to the
-credential check. The server routes it calls (`docs/API.md`) are **not built yet** in
-`station-house-platform`, so commands other than `login` / `logout` answer "doesn't support that yet"
-until they ship.
+credential check. The server routes it calls (`docs/API.md`) are built in `station-house-platform`
+(branch `feat/contributor-api`) but **not deployed yet**, so until they ship every command other than
+`login` / `logout` answers "doesn't support that yet".
 
 ## Development
 

@@ -1,8 +1,8 @@
 # API the CLI expects
 
-The CLI is a thin client. These routes live in the `station-house-platform` repo and **do not exist
-there yet** (see `~/specs/station-house-agent-work-tracking-spec.md`); the CLI answers "doesn't
-support that yet" on a 404.
+The CLI is a thin client. These routes live in the private `station-house-platform` repo
+(`src/app/api/v1/`, documented in its `docs/contributor-api.md`), on branch `feat/contributor-api`;
+they are **not deployed yet**, and the CLI answers "doesn't support that yet" on a 404.
 
 ## Auth
 
