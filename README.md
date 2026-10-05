@@ -4,6 +4,16 @@ Station House from the terminal: see who is working on what, find unclaimed work
 Many people can be on one task. You sign in with your Station House account (the email and password
 you use on the website); there is no separate token to manage.
 
+## Credit
+
+The idea, a small CLI plus agent skills that give an agent a way into a project's own world, comes
+from [**mumwelt**](https://github.com/Open-Athena/mumwelt) (`mum`), the CLI that [**Open Athena**](https://github.com/Open-Athena)
+built for the [Marin](https://github.com/marin-community/marin) project. `stationhouse-cli` follows its shape:
+a `pip`-installable command, a hosted service behind it, and a skill that teaches an agent when to
+use it. Thank you to the Open Athena team for it.
+
+## Install
+
 ```bash
 uv tool install git+https://github.com/likelytobelaura/stationhouse-cli   # or: pip install .
 stationhouse login            # your Station House email + password
