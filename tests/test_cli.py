@@ -83,6 +83,20 @@ def test_context_for_a_task_nothing_has_touched(signed_in, api, capsys):
     assert "Nobody on it yet." in out and "PRs and discussions" not in out
 
 
+def test_prs_lists_what_needs_review(signed_in, api, capsys):
+    api.routes[("GET", "/api/v1/prs")] = (200, {"project": "conspiracybench", "prs": [
+        {"repo": "Station-house/ConspiracyBench", "num": 258, "title": "Add pressure turns", "author": "vivek",
+         "taskId": "expand-existing-questions", "reviewers": [],
+         "url": "https://huggingface.co/spaces/Station-house/ConspiracyBench/discussions/258"},
+        {"repo": "Station-house/ConspiracyBench", "num": 260, "title": "Fix scorer", "author": "ada", "taskId": None,
+         "reviewers": ["bob"], "url": None}]})
+    code, out, _ = run(capsys, "prs")
+    assert code == 0
+    assert "#258  Add pressure turns  [expand-existing-questions]" in out and "by vivek, no review yet" in out
+    assert "#260  Fix scorer" in out and "commented on by bob" in out
+    assert api.calls[0]["path"] == "/api/v1/prs?project=conspiracybench&limit=10"
+
+
 def test_claim_sends_only_the_task_and_lists_others(signed_in, api, capsys):
     api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}, {"hfUsername": "ada"}]})
     code, out, _ = run(capsys, "claim", "add-question")

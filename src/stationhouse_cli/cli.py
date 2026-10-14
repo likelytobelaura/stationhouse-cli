@@ -113,6 +113,23 @@ def cmd_context(args):
     _emit(args, out, human)
 
 
+def cmd_prs(args):
+    out = request("GET", "/api/v1/prs", query={"project": args.project, "limit": args.limit})
+
+    def human(d):
+        prs = d.get("prs", [])
+        if not prs:
+            print("No open PRs are waiting for review right now.")
+        for p in prs:
+            seen = f"commented on by {', '.join(p['reviewers'][:3])}" if p.get("reviewers") else "no review yet"
+            task = f"  [{p['taskId']}]" if p.get("taskId") else ""
+            print(f"#{p['num']}  {p['title']}{task}")
+            print(f"    by {p.get('author') or 'unknown'}, {seen}")
+            if p.get("url"):
+                print(f"    {p['url']}")
+    _emit(args, out, human)
+
+
 def cmd_mine(args):
     out = request("GET", "/api/v1/me/claims")
 
@@ -386,6 +403,8 @@ def build_parser():
     add("who", cmd_who, "who is working on a task", task=True)
     add("context", cmd_context, "a task's neighbourhood: people, PRs and their latest comments", task=True)
     add("mine", cmd_mine, "tasks you have claimed")
+    pr = project(add("prs", cmd_prs, "open PRs waiting for a review (not your own), unreviewed first"))
+    pr.add_argument("--limit", type=int, default=10)
     add("claim", cmd_claim, "claim a task (same as `task claim`)", task=True)
     add("release", cmd_release, "release a task you claimed (same as `task release`)", task=True)
     a = add("assign", cmd_assign, "admins only: put someone on a task", task=True)
