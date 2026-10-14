@@ -4,6 +4,14 @@ Station House from the terminal: see who is working on what, find unclaimed work
 Many people can be on one task. You sign in with your Station House account (the email and password
 you use on the website); there is no separate token to manage.
 
+Two ways in:
+
+- **You ask.** Type a question and the Station House assistant answers: `stationhouse` opens a chat,
+  or just `stationhouse what could I work on?`.
+- **Your coding agent works it.** The commands (`find-work`, `context`, `prs`, `claim`, … with
+  `--json`) return plain facts, and your own agent (Claude Code, Codex, Cursor) reasons over them.
+  See [Using it from a coding agent](#using-it-from-a-coding-agent).
+
 ## Credit
 
 The idea, a small CLI plus agent skills that give an agent a way into a project's own world, comes
@@ -37,7 +45,8 @@ themselves, so `stationhouse claim <task-id>` works from anywhere.
 
 ## Chat
 
-Run `stationhouse` on its own and talk to it:
+Run `stationhouse` on its own and talk to it, or put the question straight on the command line
+(`stationhouse who is working on the scorer?`, or `stationhouse ask "…"`) to ask once:
 
 ```
 $ stationhouse
@@ -54,8 +63,17 @@ Plain lines go to the Station House assistant, which reads the projects, tasks, 
 what's happening in their PRs (it runs on the platform, so there's nothing to set up). It never
 changes anything itself: when it suggests claiming or releasing a task you're asked, and on a yes the
 CLI does it as you. Lines starting with `/` run any command above (`/who`, `/claim`, `/login`, …).
-`stationhouse chat "question"` asks once and exits. If the assistant is switched off or has used
-its monthly budget, you get the offline `explore` answer instead.
+If the assistant is switched off or has used its monthly budget, you get the offline `explore`
+answer instead.
+
+In zsh (the macOS default) a trailing `?` is a filename wildcard, so `stationhouse what's open?` fails
+with "no matches found" before the CLI runs. Leave the `?` off, quote the question
+(`stationhouse ask "what's open?"`), or add `alias stationhouse='noglob stationhouse' sth='noglob sth'`
+to your `~/.zshrc`.
+
+A command typed exactly runs as that command (`stationhouse who add-question`); anything that isn't
+a command is a question. A near-miss like `stationhouse claimm x` is an error ("did you mean
+`claim`?"), never a question.
 
 ## Using it from a coding agent
 
@@ -67,9 +85,11 @@ stationhouse agents-md        # Codex, Cursor and others: writes the same rules 
 `agents-md` adds a marked section to the project's `AGENTS.md` and leaves the rest of the file alone;
 run it again after upgrading to refresh the section (`--print` shows it without writing).
 
-Then ask your agent "what should I work on?" It runs `unclaimed`, reads the summaries, and suggests
-a task. It claims only after you agree. **You sign in yourself**: the skill tells the agent to ask
-you to run `stationhouse login` and never to handle your password.
+Then ask your agent "what should I work on?" It runs `find-work --json`, reads the summaries and
+reasons, and suggests a task. It claims only after you agree. The skill keeps your agent on the
+fact-returning commands rather than the platform's assistant: your agent is already the one doing
+the thinking, and `explore` is a plain lookup with no model in it. **You sign in yourself**: the
+skill tells the agent to ask you to run `stationhouse login` and never to handle your password.
 
 ## How sign-in works
 
@@ -84,10 +104,8 @@ you to run `stationhouse login` and never to handle your password.
 
 ## Status
 
-The CLI is complete and tested against a fake server; real Cognito sign-in is exercised up to the
-credential check. The server routes it calls (`docs/API.md`) are built in `station-house-platform`
-(branch `feat/contributor-api`) but **not deployed yet**, so until they ship every command other than
-`login` / `logout` answers "doesn't support that yet".
+Live against `https://app.station-house.net`. The routes it calls are listed in `docs/API.md`; the
+tests run the CLI against a fake server.
 
 ## Development
 

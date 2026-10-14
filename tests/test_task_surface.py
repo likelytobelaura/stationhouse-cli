@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from stationhouse_cli import cli, llm
+from stationhouse_cli import cli
 
 TREE = {
     "project": "conspiracybench", "you": "me",
@@ -172,64 +172,31 @@ def test_explore_subtasks_shows_the_family_from_either_end(tree, capsys):
         assert "add-question  Add a question" in out and "add-question-edge  Edge case questions  [subtask of Add a question]" in out
 
 
-def test_explore_search_without_a_model_lists_matches_and_never_calls_one(tree, monkeypatch, capsys):
-    monkeypatch.setattr(llm, "ask_local", lambda *a, **k: (_ for _ in ()).throw(AssertionError("model called")))
-    _, out, _ = run(capsys, "explore", "--no-llm", "malformed", "output", "from", "models")
-    assert out.startswith("scorer  Scorer hardening")
+def test_explore_search_lists_matches_and_uses_no_model(tree, capsys):
+    # --no-llm is still accepted (old scripts pass it) and changes nothing: explore never uses a model.
+    for argv in (("explore", "malformed", "output", "from", "models"), ("explore", "--no-llm", "malformed", "output")):
+        _, out, _ = run(capsys, *argv)
+        assert out.startswith("scorer  Scorer hardening")
+    assert [c["path"] for c in tree.calls] == ["/api/v1/projects/conspiracybench/tasks"] * 2  # nothing but the platform
 
 
-def test_explore_search_uses_the_local_model_when_it_answers(tree, monkeypatch, capsys):
-    seen = {}
-
-    def fake(question, tasks, known, **kw):
-        seen.update(question=question, ids=[t["taskId"] for t in tasks], known=known, url=kw["url"])
-        return "Use `scorer` for that.", None
-    monkeypatch.setattr(llm, "ask_local", fake)
-    _, out, _ = run(capsys, "explore", "which", "task", "covers", "malformed", "output?")
-    assert out.startswith("Use `scorer` for that.") and "local model qwen3.5:4b" in out and "scorer  Scorer hardening" in out
-    assert seen["url"].startswith("http://localhost") and seen["ids"][0] == "scorer"
-
-
-def test_explore_search_falls_back_quietly_when_there_is_no_model(tree, monkeypatch, capsys):
-    monkeypatch.setattr(llm, "ask_local", lambda *a, **k: (None, "no local model reachable at http://localhost:11434"))
-    code, out, _ = run(capsys, "explore", "malformed", "output")
-    assert code == 0 and out.startswith("scorer  Scorer hardening") and "reachable" not in out
-
-
-def test_explore_says_when_it_dropped_an_ungrounded_model_answer(tree, monkeypatch, capsys):
-    monkeypatch.setattr(llm, "ask_local", lambda *a, **k: (None, "the local model's answer cited a task that isn't in the list, so I dropped it"))
-    _, out, _ = run(capsys, "explore", "malformed", "output")
-    assert "I dropped it" in out and "scorer  Scorer hardening" in out
-
-
-def test_explore_json(tree, capsys):
-    _, out, _ = run(capsys, "explore", "--no-llm", "--json", "who", "is", "on", "scorer")
+def test_explore_json_is_facts_only(tree, capsys):
+    _, out, _ = run(capsys, "explore", "--json", "who", "is", "on", "scorer")
     d = json.loads(out)
-    assert d["intent"] == "who" and d["tasks"][0]["taskId"] == "scorer" and d["answer"] is None
+    assert d["intent"] == "who" and d["tasks"][0]["taskId"] == "scorer"
+    assert not {"answer", "model", "modelNote"} & set(d)
 
 
 def test_explore_with_nothing_matching_says_so(tree, capsys):
-    _, out, _ = run(capsys, "explore", "--no-llm", "quantum", "chromodynamics")
+    _, out, _ = run(capsys, "explore", "quantum", "chromodynamics")
     assert "Nothing in the task list matches that." in out
 
 
-def test_explore_mode_answers_several_questions_and_exits(tree, monkeypatch, capsys):
-    lines = iter(["who is on scorer hardening", "refresh", "what is unclaimed", "exit"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(lines))
-    code, out, _ = run(capsys, "explore", "--no-llm")
-    assert code == 0 and "Explore mode" in out and "Reloaded 4 tasks." in out
-    assert "bob (stale)" in out and "add-question-edge" in out
-    assert [c["path"].split("?")[0] for c in tree.calls] == ["/api/v1/projects/conspiracybench/tasks", "/api/v1/projects/conspiracybench/tasks"]  # once, plus the refresh
-
-
-def test_explore_mode_ends_cleanly_at_end_of_input(tree, monkeypatch, capsys):
-    monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError))
-    assert run(capsys, "explore")[0] == 0
-
-
-def test_explore_json_without_a_question_is_an_error(tree, capsys):
-    code, _, err = run(capsys, "explore", "--json")
-    assert code == 1 and "needs a question" in err
+def test_explore_without_a_question_points_people_to_the_assistant(tree, capsys):
+    for argv in (("explore",), ("explore", "--json")):
+        code, _, err = run(capsys, *argv)
+        assert code == 1 and "needs a question" in err and "chat with the assistant" in err
+    assert tree.calls == []
 
 
 # ---------------------------------------------------------------- find-work
@@ -264,66 +231,13 @@ def test_find_work_json_carries_the_reasons(tree, capsys):
     assert d["picks"][0]["taskId"] == "add-question-edge" and "nobody is on it yet" in d["picks"][0]["reasons"]
 
 
-# ---------------------------------------------------------------- the local model client
-
-class FakeOllama:
-    def __init__(self, reply):
-        import threading
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        self.calls = []
-        outer = self
-
-        class H(BaseHTTPRequestHandler):
-            def do_POST(self):
-                n = int(self.headers.get("Content-Length") or 0)
-                outer.calls.append({"path": self.path, "body": json.loads(self.rfile.read(n))})
-                data = json.dumps(reply).encode()
-                self.send_response(200)
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-            def log_message(self, *a):
-                pass
-        self.server = HTTPServer(("127.0.0.1", 0), H)
-        self.url = f"http://127.0.0.1:{self.server.server_port}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-
-def test_ask_local_sends_the_tasks_to_the_given_model_and_returns_a_grounded_answer():
-    fake = FakeOllama({"message": {"content": "That's `scorer`."}})
-    text, why = llm.ask_local("what covers scoring?", TREE["tasks"], {t["taskId"] for t in TREE["tasks"]}, url=fake.url, model="m")
-    fake.server.shutdown()
-    assert (text, why) == ("That's `scorer`.", None)
-    body = fake.calls[0]["body"]
-    assert fake.calls[0]["path"] == "/api/chat" and body["model"] == "m" and body["think"] is False
-    assert body["options"]["temperature"] == 0
-    prompt = body["messages"][1]["content"]
-    assert "`scorer`: Scorer hardening" in prompt and "what covers scoring?" in prompt
-    assert "ada" not in prompt and "bob" not in prompt  # who is on what stays out of the model's hands
-
-
-def test_ask_local_drops_an_answer_that_cites_an_invented_or_no_task():
-    ids = {"scorer"}
-    for content in ("Try `scorer-v2`.", "Try `scorer` and `ghost`.", "No ids cited at all."):
-        fake = FakeOllama({"message": {"content": content}})
-        text, why = llm.ask_local("q", TREE["tasks"], ids, url=fake.url, model="m")
-        fake.server.shutdown()
-        assert text is None and "dropped" in why
-
-
-def test_ask_local_without_ollama_returns_why_instead_of_raising():
-    text, why = llm.ask_local("q", TREE["tasks"], {"scorer"}, url="http://127.0.0.1:9", model="m", timeout=2)
-    assert text is None and "no local model reachable" in why
-
-
 # ---------------------------------------------------------------- tasks people don't pick up (make-account)
 
 def test_find_work_and_unclaimed_explore_skip_tasks_the_server_says_arent_workable(signed_in, api, capsys):
     api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, {**TREE, "tasks": TREE["tasks"] + [MAKE_ACCOUNT]})
     _, out, _ = run(capsys, "find-work", "--limit", "10")
     assert "make-account" not in out and "add-question-edge" in out
-    _, out, _ = run(capsys, "explore", "--no-llm", "what is unclaimed")
+    _, out, _ = run(capsys, "explore", "what is unclaimed")
     assert "make-account" not in out and "add-question-edge" in out
 
 
@@ -376,8 +290,9 @@ def test_the_agent_rules_cover_prs_projects_and_context(tmp_path, capsys):
     run(capsys, "agents-md", "--dir", str(tmp_path))
     text = (tmp_path / "AGENTS.md").read_text()
     for needed in ("stationhouse prs", "stationhouse projects", "--project <id>", "stationhouse context", "A PR is not a task",
-                   "Suggested: claim"):
+                   "you are the assistant"):
         assert needed in text, needed
+    assert 'stationhouse chat "' not in text  # coding agents interpret the facts themselves
 
 
 def test_agents_md_needs_no_sign_in(tmp_path, capsys):

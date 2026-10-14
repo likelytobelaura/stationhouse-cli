@@ -30,12 +30,3 @@ def settings_path() -> Path:
 def project_env() -> str | None:
     """STATIONHOUSE_PROJECT, for scripts and agents that pin a project without touching settings."""
     return os.environ.get("STATIONHOUSE_PROJECT") or None
-
-
-def ollama_url() -> str:
-    """Where `explore` looks for a local model. Only ever your own machine unless you point it elsewhere."""
-    return os.environ.get("STATIONHOUSE_OLLAMA_URL", os.environ.get("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
-
-
-def model() -> str:
-    return os.environ.get("STATIONHOUSE_MODEL", "qwen3.5:4b")

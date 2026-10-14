@@ -2,6 +2,8 @@
 suggested claim only happens on their yes, made by the CLI itself."""
 import builtins
 
+import pytest
+
 from stationhouse_cli import cli
 
 TREE = {"project": "conspiracybench", "you": "me", "tasks": [
@@ -106,6 +108,42 @@ def test_one_shot_from_an_agent_prints_the_suggestion_and_changes_nothing(signed
     assert code == 0 and asked == []
     assert "Suggested: claim add-question" in out and "stationhouse claim add-question" in out
     assert not [c for c in api.calls if c["path"] == "/api/v1/projects/conspiracybench/tasks/add-question/claim"]
+
+
+def test_typing_a_question_asks_the_assistant(signed_in, api, capsys, monkeypatch):
+    api.routes[("POST", "/api/v1/agent/chat")] = (200, {**REPLY, "suggestedActions": []})
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    for argv, text in (
+        (["what", "could", "I", "work", "on?"], "what could I work on?"),
+        (["who", "is", "working", "on", "the", "scorer?"], "who is working on the scorer?"),  # starts with a command word
+        (["ask", "any PRs to review?"], "any PRs to review?"),
+    ):
+        assert cli.main(argv) == 0
+        assert chat_calls(api)[-1]["body"]["messages"] == [{"role": "user", "text": text}]
+    assert "Try `add-question`" in capsys.readouterr().out
+
+
+def test_commands_still_run_as_commands(signed_in, api, capsys):
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks/add-question/people")] = (200, {"title": "Add a question", "people": []})
+    assert cli.main(["who", "add-question"]) == 0
+    assert "Add a question (add-question)" in capsys.readouterr().out
+    assert not chat_calls(api)
+
+
+def test_a_typo_is_an_error_not_a_question(signed_in, api, capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["claimm", "add-question"])
+    assert e.value.code == 2 and "did you mean `claim`" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        cli.main(["task", "create", "add-question", "Title", "only"])  # a real command's own error, not a question
+    assert api.calls == []
+
+
+def test_help_is_help(signed_in, api, capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["help"])
+    assert e.value.code == 0 and "chat with the assistant" in " ".join(capsys.readouterr().out.split())
+    assert api.calls == []
 
 
 def test_signed_out_is_told_to_log_in(api, capsys, monkeypatch):

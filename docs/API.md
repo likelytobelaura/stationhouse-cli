@@ -21,33 +21,41 @@ Admin routes use `withAdmin` (Cognito `admins` group).
 
 ## Routes (all under `/api/v1`, JSON)
 
+Projects come first and tasks live under their project. A task asked for under the wrong project is a
+404 whose body names its project (`{ error, projectId, taskId }`); the CLI follows it unless you passed
+`--project` yourself.
+
 | Method + path | Body / query | Response |
 |---|---|---|
 | `GET /me` | | `{ memberId, hfUsername \| null, isAdmin }` |
-| `GET /tasks/unclaimed` | `?project=` | `{ tasks: [{ taskId, title, summary }] }` |
-| `GET /tasks/{taskId}/people` | | `{ taskId, title, people: [{ hfUsername, prNums?, stale, you? }] }` |
-| `GET /me/claims` | | `{ claims: [{ taskId, status, stale }] }` |
-| `GET /tasks` | `?project=` | `{ project, you, tasks: [{ taskId, title, parentTaskId, childTaskIds, summary, scope, completionCriteria, available, closed, people, mine, pendingSubtasks }] }` (the whole tree; `explore` and `find-work` read this) |
-| `POST /claims` | `{ taskId }` | `{ people: [...], dashboard }` (everyone now on the task; the caller has `you: true`; `dashboard` is `added` / `unchanged` / `failed` for the task's card on their website dashboard) |
-| `POST /claims/release` | `{ taskId }` | `{ ok: true, dashboard }` (`removed` / `unchanged` / `failed`) |
-| `POST /tasks` | `{ parentTaskId, title, summary }` | `{ proposalId, created, status }` (a subtask proposal an admin approves; `task create`) |
-| `POST /tasks/request` | `{ title, description, atomicUnit?, projectId? }` | `{ requestId, created, notified, status }` (a top-level task request; `task request`) |
-| `GET /proposals` | (admin only) | `{ proposals: [{ proposalId, parentTaskId, title, summary, hfUsername, prNum, source }] }` |
-| `POST /proposals/approve` | `{ proposalId }` (admin only) | `{ taskId, claimed, dashboard }` |
-| `POST /proposals/reject` | `{ proposalId }` (admin only) | `{ ok: true }` |
-| `POST /claims/assign` | `{ taskId, hfUsername }` (admin only, 403 otherwise) | `{ ok: true }` |
+| `GET /me/claims` | | `{ claims: [{ taskId, projectId, title, status, stale }] }` |
+| `GET /projects` | | `{ projects: [{ id, title, summary }] }` |
+| `GET /projects/{p}` | | `{ project, overview }` |
+| `GET /projects/{p}/tasks` | | `{ project, you, tasks: [{ taskId, title, parentTaskId, childTaskIds, summary, scope, completionCriteria, available, closed, workable, full, people, mine, pendingSubtasks }] }` (the whole tree; `explore` and `find-work` read this) |
+| `GET /projects/{p}/unclaimed` | | `{ tasks: [{ taskId, title, summary }] }` |
+| `GET /projects/{p}/prs` | `?limit=` | `{ project, prs: [{ repo, num, title, url, author, taskId, reviewers, ... }] }` |
+| `POST /projects/{p}/requests` | `{ title, description, atomicUnit? }` | `{ requestId, created, notified, status }` (`task request`) |
+| `GET /projects/{p}/tasks/{t}` | | the task in full |
+| `GET /projects/{p}/tasks/{t}/people` | | `{ projectId, taskId, title, people: [{ hfUsername, prNums?, stale, you? }] }` |
+| `GET /projects/{p}/tasks/{t}/context` | | the task's work-graph neighbourhood (`context`) |
+| `POST /projects/{p}/tasks/{t}/claim` | (no body) | `{ projectId, taskId, people, dashboard }` |
+| `POST /projects/{p}/tasks/{t}/release` | (no body) | `{ ok: true, dashboard }` |
+| `POST /projects/{p}/tasks/{t}/assign` | `{ hfUsername }` (admin only) | `{ ok: true }` |
+| `POST /projects/{p}/tasks/{t}/subtasks` | `{ title, summary }` | `{ proposalId, created, status }` (`task create`) |
+| `GET /proposals`, `POST /proposals/approve`, `POST /proposals/reject` | (admin only) | the subtask-proposal queue |
+| `POST /agent/chat` | `{ messages: [{ role, text }], project? }` | `{ reply, suggestedActions, taskIds }` (the assistant, for people) |
 
 Errors are `{ "error": "message" }` with a normal status. `claim` for a member with no verified HF
-handle should be a 409 with a message telling them to verify it on the website.
+handle is a 409 with a message telling them to verify it on the website. `dashboard` is `added` /
+`removed` / `unchanged` / `failed` for the task's card on the website dashboard.
 
-`dashboard` is optional: an older server omits it and the CLI says nothing about the card.
+## Who thinks where
 
-## What runs where
-
-`explore` and `find-work` read `GET /tasks` and think on your machine. `find-work` is a fixed ranking
-(nobody on it beats only stale claims beats shared; a subtask beats a parent with open subtasks; words
-you give it narrow the list), so its reasons are the real reasons. `explore` answers who/what/unclaimed
-questions straight from the tree; for open-ended ones it can ask a local Ollama
-(`STATIONHOUSE_OLLAMA_URL`, default `http://localhost:11434`; `STATIONHOUSE_MODEL`, default
-`qwen3.5:4b`; `--no-llm` turns it off) and drops the answer unless every task it names exists. Nothing
-is sent to any hosted model.
+- **People asking questions** (`stationhouse`, `stationhouse <question>`, `stationhouse ask`) get the
+  platform's assistant (`POST /agent/chat`), which reads the same data and never changes anything:
+  claims it suggests are put to you as y/N and made by the CLI.
+- **Coding agents and scripts** use the other commands. They return facts and do no thinking of
+  their own: `find-work` is a fixed ranking (nobody on it beats only stale claims beats shared; a
+  subtask beats a parent with open subtasks; words you give it narrow the list), so its reasons are
+  the real reasons, and `explore` is a keyword lookup over the task tree. No model runs on your
+  machine.

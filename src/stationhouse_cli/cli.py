@@ -1,12 +1,15 @@
 import argparse
+import contextlib
+import difflib
 import getpass
+import io
 import json
 import shutil
 import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, config, explore as explore_mod, llm, projects, work
+from . import __version__, chat, explore as explore_mod, projects, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -289,24 +292,14 @@ def _tree(args):
     return request("GET", projects.project_path(projects.resolve(args.project), "/tasks"))
 
 
-def _answer(question, tree, args):
-    """One question: the deterministic answer, plus the local model's words for open-ended questions."""
+def _answer(question, tree):
+    """The deterministic lookup: which tasks a question is about, and who is on them. No model."""
     result = explore_mod.explore(question, tree)
-    by_id = {t["taskId"]: t for t in tree["tasks"]}
     result["question"] = question
-    result["answer"], result["model"], result["modelNote"] = None, None, None
-    if result["intent"] == "search" and result["tasks"] and not args.no_llm:
-        text, why = llm.ask_local(question, result["tasks"], set(by_id), url=config.ollama_url(), model=config.model())
-        result["answer"], result["modelNote"] = text, why
-        result["model"] = config.model() if text else None
-    return result, by_id
+    return result, {t["taskId"]: t for t in tree["tasks"]}
 
 
 def _print_answer(result, by_id):
-    if result["answer"]:
-        print(f"{result['answer']}\n    (local model {result['model']}; the tasks it used are below)\n")
-    elif result["modelNote"] and "no local model" not in result["modelNote"]:
-        print(f"({result['modelNote']})\n")
     if result["note"]:
         print(result["note"])
     for t in result["tasks"]:
@@ -314,30 +307,13 @@ def _print_answer(result, by_id):
 
 
 def cmd_explore(args):
-    tree = _tree(args)
     question = " ".join(args.question).strip()
-    if question:
-        result, by_id = _answer(question, tree, args)
-        _emit(args, result, lambda d: _print_answer(result, by_id))
-        return
-    if args.json:
-        raise ApiError("--json needs a question: stationhouse explore --json \"who is on scoring?\"")
-    print("Explore mode. Ask about the tasks: \"who is working on the scorer?\", \"what is unclaimed?\", "
-          "\"what is ada on?\". `refresh` reloads, `exit` quits.")
-    while True:
-        try:
-            line = input("explore> ").strip()
-        except EOFError:
-            print()
-            return
-        if line in ("exit", "quit", "q"):
-            return
-        if line == "refresh":
-            tree = _tree(args)
-            print(f"Reloaded {len(tree['tasks'])} tasks.")
-        elif line:
-            result, by_id = _answer(line, tree, args)
-            _print_answer(result, by_id)
+    if not question:
+        raise ApiError("explore needs a question, e.g. stationhouse explore \"who is on scoring?\". "
+                       "To ask in your own words, just run `stationhouse` and chat with the assistant.")
+    tree = _tree(args)
+    result, by_id = _answer(question, tree)
+    _emit(args, result, lambda d: _print_answer(result, by_id))
 
 
 def cmd_find_work(args):
@@ -374,7 +350,7 @@ def _offline_answer(project_fn):
         try:
             tree = request("GET", projects.project_path(projects.resolve(project_fn()), "/tasks"))
             # Deterministic only: a quick, honest answer from the list, never a slow local model.
-            result, by_id = _answer(question, tree, argparse.Namespace(no_llm=True))
+            result, by_id = _answer(question, tree)
             _print_answer(result, by_id)
         except (AuthError, ApiError) as e:
             print(f"error: {e}")
@@ -382,9 +358,10 @@ def _offline_answer(project_fn):
 
 
 def _run_in_chat(argv):
-    """A /command typed in the chat: the normal CLI, minus the exit when argparse rejects it."""
+    """A /command typed in the chat: the normal CLI, minus the exit when argparse rejects it. Parsed
+    strictly: in the chat, plain lines are the questions and a mistyped /command is an error."""
     try:
-        main(argv)
+        main(argv, questions=False)
     except SystemExit:
         pass
 
@@ -455,7 +432,12 @@ def cmd_agents_md(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="stationhouse", description="Station House from the terminal.")
+    p = argparse.ArgumentParser(
+        prog="stationhouse",
+        description="Station House from the terminal. Asking something? Run `stationhouse` to chat with the "
+                    "assistant, or type the question: stationhouse what could I work on? The commands below "
+                    "answer with plain facts (add --json), for scripts and coding agents to reason over.",
+    )
     p.add_argument("--version", action="version", version=f"stationhouse-cli {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     # No command at all opens the chat.
@@ -475,7 +457,8 @@ def build_parser():
         sp.set_defaults(fn=fn)
         return sp
 
-    ch = project(add("chat", cmd_chat, "talk with the Station House assistant (also: `stationhouse` on its own)"))
+    ch = project(add("chat", cmd_chat, "talk with the Station House assistant (also `stationhouse` on its own, "
+                                       "or just type your question: stationhouse what could I work on?)", aliases=["ask"]))
     ch.add_argument("message", nargs="*", help="ask one question and exit, e.g. what could I work on?")
     add("login", cmd_login, "sign in with your Station House email").add_argument("--email")
     add("logout", cmd_logout, "forget the stored session")
@@ -513,9 +496,10 @@ def build_parser():
                            ("reject", cmd_task_reject, "admins only: decline a proposed subtask")):
         add(name, fn, help, under=tsub).add_argument("proposal_id", metavar="proposal-id")
 
-    e = project(add("explore", cmd_explore, "ask questions about the tasks and who is on them (no question: explore mode)"))
+    e = project(add("explore", cmd_explore, "for agents/scripts: which tasks a question is about and who is on them (no model)"))
     e.add_argument("question", nargs="*", help="e.g. who is working on the scorer?")
-    e.add_argument("--no-llm", action="store_true", help="never use a local model, even if one is running")
+    # explore no longer uses a local model at all; the flag is still accepted so old scripts don't break.
+    e.add_argument("--no-llm", action="store_true", help=argparse.SUPPRESS)
     w = project(add("find-work", cmd_find_work, "pick an open task for you to do", aliases=["work"]))
     w.add_argument("about", nargs="*", help="what you're into, e.g. adversarial prompts")
     w.add_argument("--limit", type=int, default=3, help="how many tasks to suggest (default 3)")
@@ -526,9 +510,51 @@ def build_parser():
     return p
 
 
-def main(argv=None):
+def _command_names(parser) -> set[str]:
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))  # noqa: SLF001
+    return set(sub.choices)
+
+
+# Commands a question can start with ("who is on the scorer?", "claim the scorer task for me"): when
+# what follows doesn't parse as the command, it's a question. Commands with free text or required
+# options (task, explore, assign, ...) always get their own error instead.
+QUESTION_STARTERS = {"who", "context", "claim", "release", "mine", "projects", "project", "unclaimed", "prs", "whoami"}
+
+
+def _parse(parser, argv, questions=True):
+    """Commands run as commands; anything else a person types is a question for the assistant.
+    `stationhouse who add-question` is the `who` command; `stationhouse who is working on the scorer?`
+    and `stationhouse what should I do next` are questions. A near-miss like `claimm x` is an error,
+    not a question, so a typo never quietly goes to the assistant. questions=False (a /command typed
+    in the chat) parses strictly."""
+    if not questions or not argv or argv[0].startswith("-"):
+        return parser.parse_args(argv)
+    if argv[0] == "help":
+        parser.print_help()
+        raise SystemExit(0)
+    commands = _command_names(parser)
+    if argv[0] not in commands:
+        close = difflib.get_close_matches(argv[0], commands, n=1, cutoff=0.8)
+        if close and len(argv) <= 3:
+            parser.error(f"unknown command {argv[0]!r}; did you mean `{close[0]}`?")
+        return parser.parse_args(["ask", *argv])
+    looks_like_a_sentence = argv[0] in QUESTION_STARTERS and len(argv) >= 3 and not any(a.startswith("-") for a in argv)
+    if not looks_like_a_sentence:
+        return parser.parse_args(argv)
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            return parser.parse_args(argv)
+    except SystemExit as e:
+        if e.code == 0:
+            raise
+        return parser.parse_args(["ask", *argv])
+
+
+def main(argv=None, questions=True):
     import re
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = _parse(parser, sys.argv[1:] if argv is None else list(argv), questions)
     for attr in ("task_id", "parent"):
         if hasattr(args, attr) and not re.match(TASK_ID, getattr(args, attr)):
             print(f"error: {getattr(args, attr)!r} isn't a valid task id", file=sys.stderr)
