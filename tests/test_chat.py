@@ -78,6 +78,15 @@ def test_falls_back_to_the_task_list_when_the_assistant_is_off(signed_in, api, c
     assert "isn't switched on yet" in out and "add-question" in out
 
 
+def test_falls_back_when_the_model_provider_fails(signed_in, api, capsys, monkeypatch):
+    api.routes[("POST", "/api/v1/agent/chat")] = (502, {"error": "The assistant couldn't answer right now."})
+    api.routes[("GET", "/api/v1/tasks")] = (200, TREE)
+    typing(monkeypatch, "who is on add question?")
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "couldn't answer right now" in out and "Answering from the task list" in out and "add-question" in out
+
+
 def test_one_shot_question(signed_in, api, capsys, monkeypatch):
     api.routes[("POST", "/api/v1/agent/chat")] = (200, {**REPLY, "suggestedActions": []})
     code = cli.main(["chat", "what", "next?"])
