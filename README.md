@@ -23,6 +23,7 @@ stationhouse context <task-id>  # the task's neighbourhood: people, its PRs/disc
 stationhouse claim <task-id>  # put yourself on it
 stationhouse release <task-id>
 stationhouse mine
+stationhouse prs              # open PRs waiting for a review (not yours), unreviewed first
 ```
 
 `sth` is a short alias. Add `--json` to any command for machine-readable output.
