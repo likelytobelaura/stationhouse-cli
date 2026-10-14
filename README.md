@@ -27,6 +27,28 @@ stationhouse mine
 
 `sth` is a short alias. Add `--json` to any command for machine-readable output.
 
+## Chat
+
+Run `stationhouse` on its own and talk to it:
+
+```
+$ stationhouse
+Station House. Ask about the projects and tasks, or what to work on next. /help lists commands, /exit leaves.
+you> I like adversarial prompts, what could I pick up?
+Try `stress-test-solver`: nobody is on it yet, and it's about breaking the solver with hostile inputs.
+Claim stress-test-solver, "Stress test the solver" (matches what you're into)? [y/N] y
+You're on stress-test-solver.
+It's on your dashboard now.
+you> /context stress-test-solver
+```
+
+Plain lines go to the Station House assistant, which reads the projects, tasks, who is on them and
+what's happening in their PRs (it runs on the platform, so there's nothing to set up). It never
+changes anything itself: when it suggests claiming or releasing a task you're asked, and on a yes the
+CLI does it as you. Lines starting with `/` run any command above (`/who`, `/claim`, `/login`, …).
+`stationhouse chat "question"` asks once and exits. If the assistant is switched off or out of
+questions for the day, you get the offline `explore` answer instead.
+
 ## Using it from a coding agent
 
 ```bash

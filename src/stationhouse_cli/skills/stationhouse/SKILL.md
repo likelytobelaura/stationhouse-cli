@@ -35,6 +35,9 @@ stationhouse task proposals|approve|reject  admins only: review proposed subtask
 
 `claim` and `release` also work without `task`.
 
+`stationhouse` with no command opens an interactive chat for people; don't run it bare (it waits for
+typing). Use the commands above, which give you the facts directly.
+
 ## Picking work
 
 1. `stationhouse find-work --json` (add what the contributor is into, e.g. `find-work adversarial prompts`).

@@ -6,7 +6,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, config, explore as explore_mod, llm, work
+from . import __version__, chat, config, explore as explore_mod, llm, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -307,6 +307,41 @@ def cmd_find_work(args):
                  "matched": out["matched"], "open": out["open"]}, lambda _d: human(out))
 
 
+def _offline_answer(project):
+    """The chat's fallback when the assistant can't answer: `explore` over the task list."""
+    def answer(question):
+        try:
+            tree = request("GET", "/api/v1/tasks", query={"project": project})
+            # Deterministic only: a quick, honest answer from the list, never a slow local model.
+            result, by_id = _answer(question, tree, argparse.Namespace(no_llm=True))
+            _print_answer(result, by_id)
+        except (AuthError, ApiError) as e:
+            print(f"error: {e}")
+    return answer
+
+
+def _run_in_chat(argv):
+    """A /command typed in the chat: the normal CLI, minus the exit when argparse rejects it."""
+    try:
+        main(argv)
+    except SystemExit:
+        pass
+
+
+def cmd_chat(args):
+    if args.json:
+        raise ApiError("Chat is interactive; for machine-readable output use the other commands with --json.")
+    session = chat.Chat(args.project, _run_in_chat, _offline_answer(args.project))
+    question = " ".join(args.message).strip()
+    if question:
+        session.turn(question)
+        return
+    signed_in = load_credentials() is not None
+    chat.run(session, "Station House. Ask about the projects and tasks, or what to work on next. "
+                      "/help lists commands, /exit leaves."
+                      + ("" if signed_in else "\nYou aren't signed in yet: type /login first."))
+
+
 def cmd_assign(args):
     out = request("POST", "/api/v1/claims/assign", {"taskId": args.task_id, "hfUsername": args.handle.lstrip("@")})
     _emit(args, out, lambda d: print(f"Assigned {args.handle.lstrip('@')} to {args.task_id}."))
@@ -326,7 +361,9 @@ def build_parser():
     p = argparse.ArgumentParser(prog="stationhouse", description="Station House from the terminal.")
     p.add_argument("--version", action="version", version=f"stationhouse-cli {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable output")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # No command at all opens the chat.
+    p.set_defaults(fn=cmd_chat, message=[], project=config.DEFAULT_PROJECT)
+    sub = p.add_subparsers(dest="cmd")
 
     def add(name, fn, help, task=False, under=None, aliases=()):
         sp = (under or sub).add_parser(name, help=help, aliases=list(aliases))
@@ -340,6 +377,8 @@ def build_parser():
         sp.add_argument("--project", default=config.DEFAULT_PROJECT)
         return sp
 
+    ch = project(add("chat", cmd_chat, "talk with the Station House assistant (also: `stationhouse` on its own)"))
+    ch.add_argument("message", nargs="*", help="ask one question and exit, e.g. what could I work on?")
     add("login", cmd_login, "sign in with your Station House email").add_argument("--email")
     add("logout", cmd_logout, "forget the stored session")
     add("whoami", cmd_whoami, "who you are signed in as")
