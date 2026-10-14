@@ -38,6 +38,10 @@ stationhouse prs              # open PRs waiting for a review (not yours), unrev
 
 `sth` is a short alias. Add `--json` to any command for machine-readable output.
 
+The first time you run it in a terminal, a train pulls through to welcome you (once; `stationhouse
+train` brings it back). It never runs for scripts, coding agents or `--json`, and
+`STATIONHOUSE_NO_TRAIN=1` turns it off.
+
 Tasks live inside projects. Project-wide commands (`unclaimed`, `prs`, `find-work`, `explore`, `task
 request`) work in `--project <id>`, else `STATIONHOUSE_PROJECT`, else the project you picked with
 `project use`, else the only one you can see. Commands that take a task id find its project
