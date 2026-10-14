@@ -1,9 +1,9 @@
-"""Ask questions of the task tree, and find the work to do next.
+"""Look things up in a project's task tree, and find the work to do next.
 
-Everything here is pure: it reads the tree that `GET /api/v1/tasks` returns (tasks with their
-subtasks, summaries and the people on them) and answers from it. Who is working on what is always
-read off the tree, never recalled by a model; a local model (llm.py) is only used to talk about what
-a task *is*, and its answer is checked against the tree before it is shown.
+Everything here is pure and deterministic, with no model: it reads the tree that
+`GET /api/v1/projects/<project>/tasks` returns (tasks with their subtasks, summaries and the people on
+them) and answers from it, so a coding agent gets facts to reason over. People asking in their own
+words talk to the platform's assistant instead (`stationhouse`, chat.py).
 """
 import math
 import re

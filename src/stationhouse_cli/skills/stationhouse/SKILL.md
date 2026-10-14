@@ -8,6 +8,10 @@ description: See the Station House projects the contributor can see and who is w
 The `stationhouse` CLI (alias `sth`) talks to the Station House platform as the signed-in
 contributor. Many people can be on one task; claiming never locks it.
 
+These commands are for you, the coding agent: each returns plain facts from the platform (add
+`--json`), and you do the reasoning and the talking. The platform also has an assistant for people
+who type questions straight into their terminal; you don't use it, because here you are the assistant.
+
 ## Signing in
 
 Run `stationhouse whoami` first. If it says you aren't signed in, **stop and ask the human to
@@ -22,7 +26,7 @@ Add `--json` for output you can parse.
 stationhouse projects                       the projects they can see (and which one they picked)
 stationhouse project [use <id> | clear]     show / pick / forget the project they work in
 stationhouse find-work [about words]        pick an open task for the contributor, with the reasons
-stationhouse explore "question"             ask about the tasks and who is on them (no question: explore mode)
+stationhouse explore "question"             which tasks a question is about, and who is on them (a lookup; no model)
 stationhouse task claim <task-id>           put the contributor on a task or subtask; it shows on their dashboard
 stationhouse task release <task-id>         take them off it (and off their dashboard)
 stationhouse task create <parent-id> <title...> -s "summary"      propose a SUBTASK of an existing task
@@ -32,7 +36,6 @@ stationhouse who <task-id>                  people on a task, and whether each i
 stationhouse context <task-id>              what's happening on a task: who, which PRs/discussions, their latest comments
 stationhouse mine                           the contributor's own claims
 stationhouse prs [--project P]              open PRs waiting for a review (not the contributor's own), unreviewed first
-stationhouse chat "question"                one question to the platform's Station House assistant (optional; see below)
 stationhouse assign <task-id> <hf-handle>   admins only
 stationhouse task proposals|approve|reject  admins only: review proposed subtasks
 ```
@@ -49,8 +52,10 @@ picked they stop and ask, so pass `--project` when the contributor named one. Co
 task id (`who`, `context`, `claim`, `release`, `task create`) find the task's project themselves.
 Don't run `project use` on the contributor's behalf unless they ask; it changes their default.
 
-`stationhouse` with no command opens an interactive chat for people; don't run it bare (it waits for
-typing). Use the commands above, which give you the facts directly.
+Always run one of the commands above, spelled exactly. `stationhouse` on its own, `stationhouse
+chat`/`ask`, or words that aren't a command (`stationhouse what should I do?`) go to the people's
+assistant instead: a bare `stationhouse` waits for typing, and the others spend a model call to tell
+you less than the JSON does.
 
 ## Picking work
 
@@ -71,13 +76,12 @@ Before they review, `stationhouse context <taskId> --json` shows what else is go
 ## Answering questions about tasks
 
 - What's happening on a task, who is involved, recent PRs and comments: `stationhouse context <task-id> --json`.
-- Who is on what, or which task covers something: `stationhouse explore --json "<question>"`. Who is on
-  what comes from the platform, so report it as given; don't guess. `explore` may add a local model's
-  words about what a task is (`answer`); that text is only about the task, never about people.
-- You can reason over that JSON yourself, which is usually best. If you want the platform's own
-  assistant instead, `stationhouse chat "<question>"` asks it once and prints its reply. It never
-  changes anything; a line starting `Suggested: claim <task-id>` is only a suggestion. Put it to the
-  contributor, and claim only if they agree.
+- Who is on what, or which task covers something: `stationhouse explore --json "<question>"` (the
+  question as one quoted argument). It's a keyword lookup over the project's task list, not a model:
+  read the tasks it returns and answer from them yourself. Who is on what comes from the platform, so
+  report it as given; don't guess.
+- What a task is, its scope and when it's done: `stationhouse find-work --json` and `explore --json`
+  carry the summaries; `context` carries the activity.
 
 ## Subtask or new task?
 
