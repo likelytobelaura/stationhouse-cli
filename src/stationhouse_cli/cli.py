@@ -9,7 +9,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, explore as explore_mod, projects, work
+from . import __version__, chat, explore as explore_mod, projects, train, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -390,6 +390,16 @@ def cmd_assign(args):
     _emit(args, out, lambda d: print(f"Assigned {args.handle.lstrip('@')} to {args.task_id}."))
 
 
+def cmd_train(args):
+    if not sys.stdout.isatty():
+        print("The train only runs in a terminal.")
+        return
+    try:
+        train.play()
+    except KeyboardInterrupt:
+        print()
+
+
 def cmd_skills_install(args):
     dest = Path(args.dir).expanduser() if args.dir else Path.home() / ".claude" / "skills"
     src = resources.files("stationhouse_cli") / "skills" / "stationhouse"
@@ -503,6 +513,7 @@ def build_parser():
     w = project(add("find-work", cmd_find_work, "pick an open task for you to do", aliases=["work"]))
     w.add_argument("about", nargs="*", help="what you're into, e.g. adversarial prompts")
     w.add_argument("--limit", type=int, default=3, help="how many tasks to suggest (default 3)")
+    add("train", cmd_train, "watch the welcome train again")
     add("skills-install", cmd_skills_install, "install the agent skill (Claude Code)").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
     am = add("agents-md", cmd_agents_md, "write the usage rules into AGENTS.md for other coding agents (Codex, Cursor, ...)")
     am.add_argument("--dir", default=".", help="project directory (default: here)")
@@ -559,6 +570,8 @@ def main(argv=None, questions=True):
         if hasattr(args, attr) and not re.match(TASK_ID, getattr(args, attr)):
             print(f"error: {getattr(args, attr)!r} isn't a valid task id", file=sys.stderr)
             return 2
+    if args.fn is not cmd_train:
+        train.welcome(bool(getattr(args, "json", False)))
     try:
         args.fn(args)
     except (AuthError, ApiError) as e:
