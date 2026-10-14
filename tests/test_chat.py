@@ -8,7 +8,7 @@ TREE = {"project": "conspiracybench", "you": "me", "tasks": [
     {"taskId": "add-question", "title": "Add a question", "parentTaskId": None, "childTaskIds": [], "summary": "Write one.",
      "scope": [], "completionCriteria": "c", "available": True, "closed": False, "workable": True, "people": [],
      "mine": False, "pendingSubtasks": []}]}
-REPLY = {"reply": "Try `add-question`: nobody is on it.", "taskIds": ["add-question"], "turnsLeftToday": 30,
+REPLY = {"reply": "Try `add-question`: nobody is on it.", "taskIds": ["add-question"],
          "suggestedActions": [{"type": "claim", "taskId": "add-question", "title": "Add a question", "reason": "Nobody is on it."}]}
 
 
@@ -79,10 +79,10 @@ def test_falls_back_to_the_task_list_when_the_assistant_is_off(signed_in, api, c
 
 
 def test_one_shot_question(signed_in, api, capsys, monkeypatch):
-    api.routes[("POST", "/api/v1/agent/chat")] = (200, {**REPLY, "suggestedActions": [], "turnsLeftToday": 2})
+    api.routes[("POST", "/api/v1/agent/chat")] = (200, {**REPLY, "suggestedActions": []})
     code = cli.main(["chat", "what", "next?"])
     out = capsys.readouterr().out
-    assert code == 0 and "Try `add-question`" in out and "2 assistant questions left today" in out
+    assert code == 0 and "Try `add-question`" in out
     assert chat_calls(api)[0]["body"]["messages"] == [{"role": "user", "text": "what next?"}]
 
 

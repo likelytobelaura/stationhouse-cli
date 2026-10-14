@@ -88,9 +88,6 @@ class Chat:
         self.out(reply)
         for action in res.get("suggestedActions") or []:
             self._offer(action)
-        left = res.get("turnsLeftToday")
-        if isinstance(left, int) and left <= 5:
-            self.out(f"({left} assistant question{'s' if left != 1 else ''} left today.)")
 
     def _offer(self, action):
         verb = {"claim": "Claim", "release": "Release"}.get(action.get("type"))

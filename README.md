@@ -46,8 +46,8 @@ Plain lines go to the Station House assistant, which reads the projects, tasks, 
 what's happening in their PRs (it runs on the platform, so there's nothing to set up). It never
 changes anything itself: when it suggests claiming or releasing a task you're asked, and on a yes the
 CLI does it as you. Lines starting with `/` run any command above (`/who`, `/claim`, `/login`, …).
-`stationhouse chat "question"` asks once and exits. If the assistant is switched off or out of
-questions for the day, you get the offline `explore` answer instead.
+`stationhouse chat "question"` asks once and exits. If the assistant is switched off or has used
+its monthly budget, you get the offline `explore` answer instead.
 
 ## Using it from a coding agent
 
