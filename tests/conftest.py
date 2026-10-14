@@ -17,6 +17,8 @@ def jwt(exp: float) -> str:
 def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.delenv("STATIONHOUSE_API_URL", raising=False)
+    # Most tests work in one project; the tests of picking a project unset this.
+    monkeypatch.setenv("STATIONHOUSE_PROJECT", "conspiracybench")
 
 
 @pytest.fixture

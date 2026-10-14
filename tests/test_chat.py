@@ -31,7 +31,7 @@ def chat_calls(api):
 
 def test_bare_command_opens_the_chat_and_claims_only_on_yes(signed_in, api, capsys, monkeypatch):
     api.routes[("POST", "/api/v1/agent/chat")] = (200, REPLY)
-    api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}], "dashboard": "added"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (200, {"people": [{"hfUsername": "me", "you": True}], "dashboard": "added"})
     prompts = typing(monkeypatch, "what could I work on?", "y", "exit")
     assert cli.main([]) == 0
     out = capsys.readouterr().out
@@ -39,7 +39,8 @@ def test_bare_command_opens_the_chat_and_claims_only_on_yes(signed_in, api, caps
     assert any(p.startswith("Claim add-question") for p in prompts)
     body = chat_calls(api)[0]["body"]
     assert body == {"messages": [{"role": "user", "text": "what could I work on?"}], "project": "conspiracybench"}
-    assert [c["body"] for c in api.calls if c["path"] == "/api/v1/claims"] == [{"taskId": "add-question"}]
+    # The CLI makes the claim itself, with no body: who comes from the token, which task from the path.
+    assert [c["body"] for c in api.calls if c["path"] == "/api/v1/projects/conspiracybench/tasks/add-question/claim"] == [None]
 
 
 def test_saying_no_changes_nothing(signed_in, api, capsys, monkeypatch):
@@ -47,7 +48,7 @@ def test_saying_no_changes_nothing(signed_in, api, capsys, monkeypatch):
     typing(monkeypatch, "what could I work on?", "n")
     cli.main([])
     assert "left as it is" in capsys.readouterr().out
-    assert not [c for c in api.calls if c["path"] == "/api/v1/claims"]
+    assert not [c for c in api.calls if c["path"] == "/api/v1/projects/conspiracybench/tasks/add-question/claim"]
 
 
 def test_the_conversation_carries_over_and_clear_forgets_it(signed_in, api, capsys, monkeypatch):
@@ -61,7 +62,7 @@ def test_the_conversation_carries_over_and_clear_forgets_it(signed_in, api, caps
 
 
 def test_slash_runs_a_normal_command(signed_in, api, capsys, monkeypatch):
-    api.routes[("GET", "/api/v1/tasks/add-question/people")] = (200, {"title": "Add a question", "people": []})
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks/add-question/people")] = (200, {"title": "Add a question", "people": []})
     typing(monkeypatch, "/who add-question", "/who", "/nope")
     cli.main([])
     out = capsys.readouterr()
@@ -71,7 +72,7 @@ def test_slash_runs_a_normal_command(signed_in, api, capsys, monkeypatch):
 
 def test_falls_back_to_the_task_list_when_the_assistant_is_off(signed_in, api, capsys, monkeypatch):
     api.routes[("POST", "/api/v1/agent/chat")] = (503, {"error": "The assistant isn't switched on yet.", "code": "agentOff"})
-    api.routes[("GET", "/api/v1/tasks")] = (200, TREE)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, TREE)
     typing(monkeypatch, "who is on add question?")
     cli.main([])
     out = capsys.readouterr().out
@@ -80,7 +81,7 @@ def test_falls_back_to_the_task_list_when_the_assistant_is_off(signed_in, api, c
 
 def test_falls_back_when_the_model_provider_fails(signed_in, api, capsys, monkeypatch):
     api.routes[("POST", "/api/v1/agent/chat")] = (502, {"error": "The assistant couldn't answer right now."})
-    api.routes[("GET", "/api/v1/tasks")] = (200, TREE)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, TREE)
     typing(monkeypatch, "who is on add question?")
     cli.main([])
     out = capsys.readouterr().out
@@ -104,7 +105,7 @@ def test_one_shot_from_an_agent_prints_the_suggestion_and_changes_nothing(signed
     out = capsys.readouterr().out
     assert code == 0 and asked == []
     assert "Suggested: claim add-question" in out and "stationhouse claim add-question" in out
-    assert not [c for c in api.calls if c["path"] == "/api/v1/claims"]
+    assert not [c for c in api.calls if c["path"] == "/api/v1/projects/conspiracybench/tasks/add-question/claim"]
 
 
 def test_signed_out_is_told_to_log_in(api, capsys, monkeypatch):

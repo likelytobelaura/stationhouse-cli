@@ -17,6 +17,8 @@ use it. Thank you to the Open Athena team for it.
 ```bash
 uv tool install git+https://github.com/likelytobelaura/stationhouse-cli   # or: pip install .
 stationhouse login            # your Station House email + password
+stationhouse projects         # the projects you can see
+stationhouse project use <id> # the one you work in (skip it if there's only one)
 stationhouse unclaimed        # open tasks nobody is on
 stationhouse who <task-id>    # who is on a task, active or stale
 stationhouse context <task-id>  # the task's neighbourhood: people, its PRs/discussions and their latest comments
@@ -27,6 +29,11 @@ stationhouse prs              # open PRs waiting for a review (not yours), unrev
 ```
 
 `sth` is a short alias. Add `--json` to any command for machine-readable output.
+
+Tasks live inside projects. Project-wide commands (`unclaimed`, `prs`, `find-work`, `explore`, `task
+request`) work in `--project <id>`, else `STATIONHOUSE_PROJECT`, else the project you picked with
+`project use`, else the only one you can see. Commands that take a task id find its project
+themselves, so `stationhouse claim <task-id>` works from anywhere.
 
 ## Chat
 

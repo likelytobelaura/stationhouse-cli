@@ -7,7 +7,6 @@ USER_POOL_ID = "us-east-1_IVIvCXApg"
 CLIENT_ID = "79iirq0u3k2uuqhq3s2tph7ru3"
 REGION = "us-east-1"
 DEFAULT_API_URL = "https://app.station-house.net"
-DEFAULT_PROJECT = "conspiracybench"
 
 
 def api_url() -> str:
@@ -21,6 +20,16 @@ def config_dir() -> Path:
 
 def credentials_path() -> Path:
     return config_dir() / "credentials.json"
+
+
+def settings_path() -> Path:
+    """Non-secret preferences (the project you picked with `project use`)."""
+    return config_dir() / "settings.json"
+
+
+def project_env() -> str | None:
+    """STATIONHOUSE_PROJECT, for scripts and agents that pin a project without touching settings."""
+    return os.environ.get("STATIONHOUSE_PROJECT") or None
 
 
 def ollama_url() -> str:
