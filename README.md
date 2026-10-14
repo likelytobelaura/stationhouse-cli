@@ -19,6 +19,7 @@ uv tool install git+https://github.com/likelytobelaura/stationhouse-cli   # or: 
 stationhouse login            # your Station House email + password
 stationhouse unclaimed        # open tasks nobody is on
 stationhouse who <task-id>    # who is on a task, active or stale
+stationhouse context <task-id>  # the task's neighbourhood: people, its PRs/discussions and their latest comments
 stationhouse claim <task-id>  # put yourself on it
 stationhouse release <task-id>
 stationhouse mine

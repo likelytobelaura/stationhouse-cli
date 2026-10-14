@@ -75,6 +75,44 @@ def cmd_who(args):
     _emit(args, out, human)
 
 
+def _context_person(p):
+    claim = p.get("claim")
+    role = ("released" if claim["released"] else "on it") if claim else None
+    did = [f"{n} {w}{'s' if n != 1 else ''}" for n, w in ((p.get("threads", 0), "PR/thread"), (p.get("comments", 0), "comment")) if n]
+    return f"  {p['user']}  ({', '.join([r for r in [role] if r] + did) or 'involved'})"
+
+
+def cmd_context(args):
+    out = request("GET", f"/api/v1/tasks/{args.task_id}/context")
+
+    def human(d):
+        t = d["task"]
+        print(f"{t['title']} ({t['taskId']})")
+        if d.get("parent"):
+            print(f"  part of: {d['parent']['taskId']}  {d['parent']['title']}")
+        for s in d.get("subtasks", []):
+            print(f"  subtask: {s['taskId']}  {s['title']}")
+        people = d.get("people", [])
+        print("\nPeople:" if people else "\nNobody on it yet.")
+        for p in people:
+            print(_context_person(p))
+        threads = d.get("threads", [])
+        if threads:
+            print("\nPRs and discussions (most recent activity first):")
+        for th in threads:
+            kind = "PR" if th.get("kind") == "PR" else "Discussion"
+            by = f" by {th['author']}" if th.get("author") else ""
+            print(f"  {kind} #{th['num']}  {th['title']}  [{th.get('status') or '?'}]{by}, {th['commentCount']} comments")
+            if th.get("url"):
+                print(f"    {th['url']}")
+            for c in th.get("recentComments", []):
+                text = " ".join(c["text"].split())
+                print(f"    {c['author']}: {text[:100]}{'…' if len(text) > 100 else ''}")
+        for m in d.get("mentions", []):
+            print(f"\n  Mentioned by {m['author']} on {m['thread']}: {' '.join(m['text'].split())[:100]}")
+    _emit(args, out, human)
+
+
 def cmd_mine(args):
     out = request("GET", "/api/v1/me/claims")
 
@@ -307,6 +345,7 @@ def build_parser():
     add("whoami", cmd_whoami, "who you are signed in as")
     project(add("unclaimed", cmd_unclaimed, "open tasks nobody is on"))
     add("who", cmd_who, "who is working on a task", task=True)
+    add("context", cmd_context, "a task's neighbourhood: people, PRs and their latest comments", task=True)
     add("mine", cmd_mine, "tasks you have claimed")
     add("claim", cmd_claim, "claim a task (same as `task claim`)", task=True)
     add("release", cmd_release, "release a task you claimed (same as `task release`)", task=True)

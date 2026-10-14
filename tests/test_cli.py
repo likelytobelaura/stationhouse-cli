@@ -45,6 +45,44 @@ def test_who_lists_people_with_staleness(signed_in, api, capsys):
     assert "ada  (active, #12)" in out and "bob  (stale)" in out
 
 
+CONTEXT = {
+    "task": {"taskId": "add-question", "projectId": "conspiracybench", "title": "Add a question", "completionCriteria": "c"},
+    "parent": {"taskId": "dataset", "title": "Build the dataset"},
+    "subtasks": [{"taskId": "add-question-es", "title": "Spanish questions"}],
+    "people": [
+        {"user": "ada", "claim": {"status": "ACTIVE", "source": "SELF", "released": False}, "threads": 0, "comments": 0},
+        {"user": "melover24", "claim": None, "threads": 1, "comments": 3},
+        {"user": "bob", "claim": {"status": "CLOSED", "source": "PR", "released": True}, "threads": 0, "comments": 1},
+    ],
+    "threads": [{
+        "repo": "Station-house/ConspiracyBench", "num": 62, "kind": "PR", "title": "Add Stage 2 pilot", "status": "merged",
+        "url": "https://huggingface.co/spaces/Station-house/ConspiracyBench/discussions/62", "author": "melover24",
+        "lastActivityAt": "2026-10-03T22:23:17.000Z", "commentCount": 7,
+        "recentComments": [{"author": "stationhouse", "at": "2026-10-03T22:23:17.000Z", "text": "looking good.\nmerging now."}],
+    }],
+    "mentions": [],
+}
+
+
+def test_context_shows_the_task_neighbourhood(signed_in, api, capsys):
+    api.routes[("GET", "/api/v1/tasks/add-question/context")] = (200, CONTEXT)
+    code, out, _ = run(capsys, "context", "add-question")
+    assert code == 0
+    assert "part of: dataset" in out and "subtask: add-question-es" in out
+    assert "ada  (on it)" in out and "melover24  (1 PR/thread, 3 comments)" in out and "bob  (released, 1 comment)" in out
+    assert "PR #62  Add Stage 2 pilot  [merged] by melover24, 7 comments" in out
+    assert "stationhouse: looking good. merging now." in out  # newlines folded
+    _, out, _ = run(capsys, "context", "add-question", "--json")
+    assert json.loads(out) == CONTEXT
+
+
+def test_context_for_a_task_nothing_has_touched(signed_in, api, capsys):
+    empty = {**CONTEXT, "parent": None, "subtasks": [], "people": [], "threads": []}
+    api.routes[("GET", "/api/v1/tasks/add-question/context")] = (200, empty)
+    _, out, _ = run(capsys, "context", "add-question")
+    assert "Nobody on it yet." in out and "PRs and discussions" not in out
+
+
 def test_claim_sends_only_the_task_and_lists_others(signed_in, api, capsys):
     api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}, {"hfUsername": "ada"}]})
     code, out, _ = run(capsys, "claim", "add-question")
