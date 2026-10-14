@@ -21,8 +21,9 @@ Any other `stationhouse` command works the same way after a /."""
 MAX_MESSAGES = 39
 MAX_QUESTION = 4000
 MAX_REPLY = 8000
-# The assistant is off (503), over budget (429) or this server doesn't have it (404): answer offline.
-OFFLINE_STATUSES = (404, 429, 503)
+# The assistant is off (503), over budget (429), failing upstream (502, e.g. Bedrock refusing) or this
+# server doesn't have it (404): answer offline.
+OFFLINE_STATUSES = (404, 429, 502, 503)
 
 
 class Chat:
