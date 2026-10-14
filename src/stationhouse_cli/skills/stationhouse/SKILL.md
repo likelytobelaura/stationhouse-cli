@@ -27,12 +27,16 @@ stationhouse task create <parent-id> <title...> -s "summary"      propose a SUBT
 stationhouse task request <title...> -d "description"             ask for a new TOP-LEVEL task
 stationhouse unclaimed [--project P]        open tasks nobody is on, with a summary
 stationhouse who <task-id>                  people on a task, and whether each is active or stale
+stationhouse context <task-id>              what's happening on a task: who, which PRs/discussions, their latest comments
 stationhouse mine                           the contributor's own claims
 stationhouse assign <task-id> <hf-handle>   admins only
 stationhouse task proposals|approve|reject  admins only: review proposed subtasks
 ```
 
 `claim` and `release` also work without `task`.
+
+`stationhouse` with no command opens an interactive chat for people; don't run it bare (it waits for
+typing). Use the commands above, which give you the facts directly.
 
 ## Picking work
 

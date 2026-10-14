@@ -6,7 +6,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, config, explore as explore_mod, llm, work
+from . import __version__, chat, config, explore as explore_mod, llm, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -72,6 +72,44 @@ def cmd_who(args):
         print(f"{d.get('title', args.task_id)} ({args.task_id})")
         people = d.get("people", [])
         print("\n".join(_people_line(p) for p in people) if people else "  nobody yet")
+    _emit(args, out, human)
+
+
+def _context_person(p):
+    claim = p.get("claim")
+    role = ("released" if claim["released"] else "on it") if claim else None
+    did = [f"{n} {w}{'s' if n != 1 else ''}" for n, w in ((p.get("threads", 0), "PR/thread"), (p.get("comments", 0), "comment")) if n]
+    return f"  {p['user']}  ({', '.join([r for r in [role] if r] + did) or 'involved'})"
+
+
+def cmd_context(args):
+    out = request("GET", f"/api/v1/tasks/{args.task_id}/context")
+
+    def human(d):
+        t = d["task"]
+        print(f"{t['title']} ({t['taskId']})")
+        if d.get("parent"):
+            print(f"  part of: {d['parent']['taskId']}  {d['parent']['title']}")
+        for s in d.get("subtasks", []):
+            print(f"  subtask: {s['taskId']}  {s['title']}")
+        people = d.get("people", [])
+        print("\nPeople:" if people else "\nNobody on it yet.")
+        for p in people:
+            print(_context_person(p))
+        threads = d.get("threads", [])
+        if threads:
+            print("\nPRs and discussions (most recent activity first):")
+        for th in threads:
+            kind = "PR" if th.get("kind") == "PR" else "Discussion"
+            by = f" by {th['author']}" if th.get("author") else ""
+            print(f"  {kind} #{th['num']}  {th['title']}  [{th.get('status') or '?'}]{by}, {th['commentCount']} comments")
+            if th.get("url"):
+                print(f"    {th['url']}")
+            for c in th.get("recentComments", []):
+                text = " ".join(c["text"].split())
+                print(f"    {c['author']}: {text[:100]}{'…' if len(text) > 100 else ''}")
+        for m in d.get("mentions", []):
+            print(f"\n  Mentioned by {m['author']} on {m['thread']}: {' '.join(m['text'].split())[:100]}")
     _emit(args, out, human)
 
 
@@ -269,6 +307,41 @@ def cmd_find_work(args):
                  "matched": out["matched"], "open": out["open"]}, lambda _d: human(out))
 
 
+def _offline_answer(project):
+    """The chat's fallback when the assistant can't answer: `explore` over the task list."""
+    def answer(question):
+        try:
+            tree = request("GET", "/api/v1/tasks", query={"project": project})
+            # Deterministic only: a quick, honest answer from the list, never a slow local model.
+            result, by_id = _answer(question, tree, argparse.Namespace(no_llm=True))
+            _print_answer(result, by_id)
+        except (AuthError, ApiError) as e:
+            print(f"error: {e}")
+    return answer
+
+
+def _run_in_chat(argv):
+    """A /command typed in the chat: the normal CLI, minus the exit when argparse rejects it."""
+    try:
+        main(argv)
+    except SystemExit:
+        pass
+
+
+def cmd_chat(args):
+    if args.json:
+        raise ApiError("Chat is interactive; for machine-readable output use the other commands with --json.")
+    session = chat.Chat(args.project, _run_in_chat, _offline_answer(args.project))
+    question = " ".join(args.message).strip()
+    if question:
+        session.turn(question)
+        return
+    signed_in = load_credentials() is not None
+    chat.run(session, "Station House. Ask about the projects and tasks, or what to work on next. "
+                      "/help lists commands, /exit leaves."
+                      + ("" if signed_in else "\nYou aren't signed in yet: type /login first."))
+
+
 def cmd_assign(args):
     out = request("POST", "/api/v1/claims/assign", {"taskId": args.task_id, "hfUsername": args.handle.lstrip("@")})
     _emit(args, out, lambda d: print(f"Assigned {args.handle.lstrip('@')} to {args.task_id}."))
@@ -288,7 +361,9 @@ def build_parser():
     p = argparse.ArgumentParser(prog="stationhouse", description="Station House from the terminal.")
     p.add_argument("--version", action="version", version=f"stationhouse-cli {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable output")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # No command at all opens the chat.
+    p.set_defaults(fn=cmd_chat, message=[], project=config.DEFAULT_PROJECT)
+    sub = p.add_subparsers(dest="cmd")
 
     def add(name, fn, help, task=False, under=None, aliases=()):
         sp = (under or sub).add_parser(name, help=help, aliases=list(aliases))
@@ -302,11 +377,14 @@ def build_parser():
         sp.add_argument("--project", default=config.DEFAULT_PROJECT)
         return sp
 
+    ch = project(add("chat", cmd_chat, "talk with the Station House assistant (also: `stationhouse` on its own)"))
+    ch.add_argument("message", nargs="*", help="ask one question and exit, e.g. what could I work on?")
     add("login", cmd_login, "sign in with your Station House email").add_argument("--email")
     add("logout", cmd_logout, "forget the stored session")
     add("whoami", cmd_whoami, "who you are signed in as")
     project(add("unclaimed", cmd_unclaimed, "open tasks nobody is on"))
     add("who", cmd_who, "who is working on a task", task=True)
+    add("context", cmd_context, "a task's neighbourhood: people, PRs and their latest comments", task=True)
     add("mine", cmd_mine, "tasks you have claimed")
     add("claim", cmd_claim, "claim a task (same as `task claim`)", task=True)
     add("release", cmd_release, "release a task you claimed (same as `task release`)", task=True)
