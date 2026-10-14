@@ -338,3 +338,48 @@ def test_login_with_no_terminal_says_so_instead_of_a_traceback(monkeypatch, caps
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError))
     code, _, err = run(capsys, "login")
     assert code == 1 and "needs a terminal" in err and "Traceback" not in err
+
+
+# ---------------------------------------------------------------- agents-md (for coding agents other than Claude Code)
+
+def test_agents_md_writes_the_usage_rules_without_the_skill_frontmatter(tmp_path, capsys):
+    code, out, _ = run(capsys, "agents-md", "--dir", str(tmp_path))
+    text = (tmp_path / "AGENTS.md").read_text()
+    assert code == 0 and "Wrote" in out
+    assert text.startswith("<!-- stationhouse:begin") and text.rstrip().endswith("<!-- stationhouse:end -->")
+    assert "stationhouse find-work" in text and "Claim only after the contributor agrees" in text.replace("**", "")
+    assert "name: stationhouse" not in text  # the Claude Code frontmatter is dropped
+
+
+def test_agents_md_keeps_what_was_already_there_and_updates_in_place(tmp_path, capsys):
+    (tmp_path / "AGENTS.md").write_text("# My project\n\nUse tabs.\n")
+    run(capsys, "agents-md", "--dir", str(tmp_path))
+    first = (tmp_path / "AGENTS.md").read_text()
+    assert first.startswith("# My project\n\nUse tabs.\n\n<!-- stationhouse:begin")
+    # Re-running replaces our section only: stale text inside is refreshed, other edits survive, nothing doubles.
+    (tmp_path / "AGENTS.md").write_text(first.replace("stationhouse find-work", "OLD TEXT", 1) + "\n## After\n\nKeep me.\n")
+    code, out, _ = run(capsys, "agents-md", "--dir", str(tmp_path))
+    again = (tmp_path / "AGENTS.md").read_text()
+    assert code == 0 and "Updated" in out
+    assert again.count("stationhouse:begin") == 1 and "OLD TEXT" not in again
+    assert again.startswith("# My project\n\nUse tabs.\n") and again.rstrip().endswith("Keep me.")
+    run(capsys, "agents-md", "--dir", str(tmp_path))
+    assert (tmp_path / "AGENTS.md").read_text() == again  # idempotent
+
+
+def test_agents_md_print_writes_nothing(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    code, out, _ = run(capsys, "agents-md", "--print")
+    assert code == 0 and out.startswith("<!-- stationhouse:begin") and not (tmp_path / "AGENTS.md").exists()
+
+
+def test_the_agent_rules_cover_prs_projects_and_context(tmp_path, capsys):
+    run(capsys, "agents-md", "--dir", str(tmp_path))
+    text = (tmp_path / "AGENTS.md").read_text()
+    for needed in ("stationhouse prs", "--project llm-self-attribution", "stationhouse context", "A PR is not a task",
+                   "Suggested: claim"):
+        assert needed in text, needed
+
+
+def test_agents_md_needs_no_sign_in(tmp_path, capsys):
+    assert run(capsys, "agents-md", "--dir", str(tmp_path))[0] == 0

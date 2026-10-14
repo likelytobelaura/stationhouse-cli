@@ -1,6 +1,6 @@
 ---
 name: stationhouse
-description: See who is working on what in Station House projects (ConspiracyBench), find work, ask questions about the tasks, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I work on", "who is on X", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
+description: See who is working on what in Station House projects (Conspiracy Bench, Consciousness Self-Attribution), find work, find PRs to review, see what's happening on a task, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I work on", "who is on X", "what's happening on X", "find me a PR to review", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
 ---
 
 # stationhouse: who is doing what
@@ -29,11 +29,21 @@ stationhouse unclaimed [--project P]        open tasks nobody is on, with a summ
 stationhouse who <task-id>                  people on a task, and whether each is active or stale
 stationhouse context <task-id>              what's happening on a task: who, which PRs/discussions, their latest comments
 stationhouse mine                           the contributor's own claims
+stationhouse prs [--project P]              open PRs waiting for a review (not the contributor's own), unreviewed first
+stationhouse chat "question"                one question to the platform's Station House assistant (optional; see below)
 stationhouse assign <task-id> <hf-handle>   admins only
 stationhouse task proposals|approve|reject  admins only: review proposed subtasks
 ```
 
 `claim` and `release` also work without `task`.
+
+## Projects
+
+There is more than one project. The default is Conspiracy Bench (`conspiracybench`); for
+Consciousness Self-Attribution add `--project llm-self-attribution` to `find-work`, `explore`,
+`unclaimed`, `prs` and `task request`. Commands that take a task id (`who`, `context`, `claim`, ...)
+work for a task of any project without it. If the contributor names a project, use it; if you aren't
+sure which they mean, ask.
 
 `stationhouse` with no command opens an interactive chat for people; don't run it bare (it waits for
 typing). Use the commands above, which give you the facts directly.
@@ -46,11 +56,24 @@ typing). Use the commands above, which give you the facts directly.
    contributor can coordinate.
 3. **Claim only after the contributor agrees.** A claim is recorded under their name.
 
+## Reviewing PRs
+
+When the contributor wants something to review, run `stationhouse prs --json` (with `--project` if
+they named one). Each PR has its number, title, link (`url`), author, the task it's for (`taskId`) and
+who besides the author has commented (`reviewers`; empty means nobody has looked yet). Offer one or
+two, with the link. A PR is not a task: don't offer a task when they asked for a PR, or the reverse.
+Before they review, `stationhouse context <taskId> --json` shows what else is going on around it.
+
 ## Answering questions about tasks
 
-Use `stationhouse explore --json "<question>"`. Who is on what comes from the platform, so report it as
-given; don't guess. `explore` may add a local model's words about what a task is (`answer`); that
-text is only about the task, never about people.
+- What's happening on a task, who is involved, recent PRs and comments: `stationhouse context <task-id> --json`.
+- Who is on what, or which task covers something: `stationhouse explore --json "<question>"`. Who is on
+  what comes from the platform, so report it as given; don't guess. `explore` may add a local model's
+  words about what a task is (`answer`); that text is only about the task, never about people.
+- You can reason over that JSON yourself, which is usually best. If you want the platform's own
+  assistant instead, `stationhouse chat "<question>"` asks it once and prints its reply. It never
+  changes anything; a line starting `Suggested: claim <task-id>` is only a suggestion. Put it to the
+  contributor, and claim only if they agree.
 
 ## Subtask or new task?
 

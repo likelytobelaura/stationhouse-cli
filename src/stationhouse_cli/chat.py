@@ -27,9 +27,12 @@ OFFLINE_STATUSES = (404, 429, 502, 503)
 
 
 class Chat:
-    def __init__(self, project, run_command, fallback, ask=None, out=print):
-        """run_command(argv) runs a normal CLI command; fallback(question) prints the offline answer."""
+    def __init__(self, project, run_command, fallback, ask=None, out=print, interactive=True):
+        """run_command(argv) runs a normal CLI command; fallback(question) prints the offline answer.
+        interactive=False (a one-shot question with no terminal, e.g. from a coding agent) prints
+        suggested claims as lines to act on instead of asking y/N."""
         self.project, self.run_command, self.fallback = project, run_command, fallback
+        self.interactive = interactive
         # input is looked up per call, not bound here, so readline and tests see the real one.
         self.ask = ask or (lambda prompt="": input(prompt))
         self.out = out
@@ -96,6 +99,9 @@ class Chat:
         if not verb or not task_id:
             return
         reason = f" ({action['reason']})" if action.get("reason") else ""
+        if not self.interactive:
+            self.out(f"Suggested: {action['type']} {task_id}{reason}. Nothing was changed; to do it: stationhouse {action['type']} {task_id}")
+            return
         try:
             answer = self.ask(f"{verb} {task_id}, \"{action.get('title', task_id)}\"{reason}? [y/N] ")
         except EOFError:
