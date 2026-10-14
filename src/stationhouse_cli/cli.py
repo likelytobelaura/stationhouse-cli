@@ -6,7 +6,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, config, explore as explore_mod, llm, work
+from . import __version__, chat, config, explore as explore_mod, llm, projects, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -51,8 +51,49 @@ def cmd_whoami(args):
         + ("  [admin]" if d.get("isAdmin") else "")))
 
 
+def cmd_projects(args):
+    out = {"projects": projects.list_projects(), "current": projects.chosen()}
+
+    def human(d):
+        if not d["projects"]:
+            print("You can't see any projects yet.")
+        for p in d["projects"]:
+            mark = "*" if p["id"] == d["current"] else " "
+            print(f"{mark} {p['id']}  {p['title']}")
+            if p.get("summary"):
+                print(f"    {p['summary'][:160]}")
+        if len(d["projects"]) > 1 and not d["current"]:
+            print("\nPick one to work in: stationhouse project use <id>")
+    _emit(args, out, human)
+
+
+def cmd_project(args):
+    if args.action == "use":
+        if not args.project_id:
+            raise ApiError("Which one? stationhouse project use <id>  (see `stationhouse projects`)")
+        project = projects.use(args.project_id)
+        _emit(args, project, lambda p: print(f"Working in {p['id']} ({p['title']}) from now on."))
+        return
+    if args.action == "clear":
+        had = projects.forget()
+        _emit(args, {"cleared": had}, lambda d: print("Forgot your project; commands will ask again." if had else "No project was picked."))
+        return
+    out = request("GET", projects.project_path(projects.resolve(args.project_id)))
+
+    def human(d):
+        p, o = d["project"], d.get("overview") or {}
+        print(f"{p['title']} ({p['id']})")
+        if o.get("researchQuestion"):
+            print(f"  {o['researchQuestion']}")
+        if o.get("currentMilestone"):
+            print(f"  Now: {o['currentMilestone']}")
+        for r in (o.get("resources") or [])[:5]:
+            print(f"  {r['label']}: {r['href']}")
+    _emit(args, out, human)
+
+
 def cmd_unclaimed(args):
-    out = request("GET", "/api/v1/tasks/unclaimed", query={"project": args.project})
+    out = request("GET", projects.project_path(projects.resolve(args.project), "/unclaimed"))
 
     def human(d):
         tasks = d.get("tasks", [])
@@ -66,7 +107,7 @@ def cmd_unclaimed(args):
 
 
 def cmd_who(args):
-    out = request("GET", f"/api/v1/tasks/{args.task_id}/people")
+    _, out = projects.task_call("GET", args.task_id, "/people", args.project)
 
     def human(d):
         print(f"{d.get('title', args.task_id)} ({args.task_id})")
@@ -83,11 +124,11 @@ def _context_person(p):
 
 
 def cmd_context(args):
-    out = request("GET", f"/api/v1/tasks/{args.task_id}/context")
+    _, out = projects.task_call("GET", args.task_id, "/context", args.project)
 
     def human(d):
         t = d["task"]
-        print(f"{t['title']} ({t['taskId']})")
+        print(f"{t['title']} ({t.get('projectId', '?')}/{t['taskId']})")
         if d.get("parent"):
             print(f"  part of: {d['parent']['taskId']}  {d['parent']['title']}")
         for s in d.get("subtasks", []):
@@ -114,7 +155,7 @@ def cmd_context(args):
 
 
 def cmd_prs(args):
-    out = request("GET", "/api/v1/prs", query={"project": args.project, "limit": args.limit})
+    out = request("GET", projects.project_path(projects.resolve(args.project), "/prs"), query={"limit": args.limit})
 
     def human(d):
         prs = d.get("prs", [])
@@ -138,7 +179,9 @@ def cmd_mine(args):
         if not claims:
             print("You haven't claimed anything.")
         for c in claims:
-            print(f"{c['taskId']}  {c.get('status', 'ACTIVE').lower()}{'  (stale)' if c.get('stale') else ''}")
+            where = f"{c['projectId']}/" if c.get("projectId") else ""
+            title = f"  {c['title']}" if c.get("title") else ""
+            print(f"{where}{c['taskId']}{title}  ({c.get('status', 'ACTIVE').lower()}{', stale' if c.get('stale') else ''})")
     _emit(args, out, human)
 
 
@@ -155,10 +198,10 @@ CARD_REMOVED = {
 
 
 def cmd_claim(args):
-    out = request("POST", "/api/v1/claims", {"taskId": args.task_id})
+    _, out = projects.task_call("POST", args.task_id, "/claim", args.project)
 
     def human(d):
-        print(f"You're on {args.task_id}.")
+        print(f"You're on {d.get('taskId', args.task_id)}.")
         if d.get("dashboard") in CARD_ADDED:
             print(CARD_ADDED[d["dashboard"]])
         others = [p for p in d.get("people", []) if not p.get("you")]
@@ -169,7 +212,7 @@ def cmd_claim(args):
 
 
 def cmd_release(args):
-    out = request("POST", "/api/v1/claims/release", {"taskId": args.task_id})
+    _, out = projects.task_call("POST", args.task_id, "/release", args.project)
 
     def human(d):
         print(f"Released {args.task_id}.")
@@ -180,7 +223,7 @@ def cmd_release(args):
 
 def cmd_task_create(args):
     title = " ".join(args.title)
-    out = request("POST", "/api/v1/tasks", {"parentTaskId": args.parent, "title": title, "summary": args.summary})
+    _, out = projects.task_call("POST", args.parent, "/subtasks", args.project, {"title": title, "summary": args.summary})
 
     def human(d):
         if d.get("created"):
@@ -193,16 +236,17 @@ def cmd_task_create(args):
 
 def cmd_task_request(args):
     title = " ".join(args.title)
-    body = {"title": title, "description": args.description, "projectId": args.project}
+    body = {"title": title, "description": args.description}
     if args.atomic_unit:
         body["atomicUnit"] = args.atomic_unit
-    out = request("POST", "/api/v1/tasks/request", body)
+    project = projects.resolve(args.project)
+    out = request("POST", projects.project_path(project, "/requests"), body)
 
     def human(d):
         if not d.get("created"):
             print(f"You've already requested \"{title}\". Nothing new was filed.")
             return
-        print(f"Requested \"{title}\". The maintainers decide whether it becomes a task.")
+        print(f"Requested \"{title}\" in {project}. The maintainers decide whether it becomes a task.")
         if not d.get("notified"):
             print("Warning: it's recorded, but the email to the maintainers didn't go out. Mention it to one of them.")
     _emit(args, out, human)
@@ -242,7 +286,7 @@ def cmd_task_reject(args):
 
 
 def _tree(args):
-    return request("GET", "/api/v1/tasks", query={"project": args.project})
+    return request("GET", projects.project_path(projects.resolve(args.project), "/tasks"))
 
 
 def _answer(question, tree, args):
@@ -324,11 +368,11 @@ def cmd_find_work(args):
                  "matched": out["matched"], "open": out["open"]}, lambda _d: human(out))
 
 
-def _offline_answer(project):
-    """The chat's fallback when the assistant can't answer: `explore` over the task list."""
+def _offline_answer(project_fn):
+    """The chat's fallback when the assistant can't answer: `explore` over the current project's tasks."""
     def answer(question):
         try:
-            tree = request("GET", "/api/v1/tasks", query={"project": project})
+            tree = request("GET", projects.project_path(projects.resolve(project_fn()), "/tasks"))
             # Deterministic only: a quick, honest answer from the list, never a slow local model.
             result, by_id = _answer(question, tree, argparse.Namespace(no_llm=True))
             _print_answer(result, by_id)
@@ -349,19 +393,23 @@ def cmd_chat(args):
     if args.json:
         raise ApiError("Chat is interactive; for machine-readable output use the other commands with --json.")
     question = " ".join(args.message).strip()
-    session = chat.Chat(args.project, _run_in_chat, _offline_answer(args.project),
+    # Re-read each turn, so `/project use <id>` in the chat takes effect at once.
+    project_fn = lambda: projects.chosen(args.project)  # noqa: E731
+    session = chat.Chat(project_fn, _run_in_chat, _offline_answer(project_fn),
                         interactive=not question or sys.stdin.isatty())
     if question:
         session.turn(question)
         return
     signed_in = load_credentials() is not None
+    where = project_fn()
     chat.run(session, "Station House. Ask about the projects and tasks, or what to work on next. "
                       "/help lists commands, /exit leaves."
+                      + (f"\nWorking in {where} (/project use <id> to switch)." if where else "\nAll your projects (/project use <id> to focus on one).")
                       + ("" if signed_in else "\nYou aren't signed in yet: type /login first."))
 
 
 def cmd_assign(args):
-    out = request("POST", "/api/v1/claims/assign", {"taskId": args.task_id, "hfUsername": args.handle.lstrip("@")})
+    _, out = projects.task_call("POST", args.task_id, "/assign", args.project, {"hfUsername": args.handle.lstrip("@")})
     _emit(args, out, lambda d: print(f"Assigned {args.handle.lstrip('@')} to {args.task_id}."))
 
 
@@ -411,19 +459,20 @@ def build_parser():
     p.add_argument("--version", action="version", version=f"stationhouse-cli {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     # No command at all opens the chat.
-    p.set_defaults(fn=cmd_chat, message=[], project=config.DEFAULT_PROJECT)
+    p.set_defaults(fn=cmd_chat, message=[], project=None)
     sub = p.add_subparsers(dest="cmd")
+
+    def project(sp):
+        sp.add_argument("--project", help="project id (default: the one from `project use`, or the only one)")
+        return sp
 
     def add(name, fn, help, task=False, under=None, aliases=()):
         sp = (under or sub).add_parser(name, help=help, aliases=list(aliases))
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output")
         if task:
             sp.add_argument("task_id", metavar="task-id")
+            project(sp)
         sp.set_defaults(fn=fn)
-        return sp
-
-    def project(sp):
-        sp.add_argument("--project", default=config.DEFAULT_PROJECT)
         return sp
 
     ch = project(add("chat", cmd_chat, "talk with the Station House assistant (also: `stationhouse` on its own)"))
@@ -431,6 +480,10 @@ def build_parser():
     add("login", cmd_login, "sign in with your Station House email").add_argument("--email")
     add("logout", cmd_logout, "forget the stored session")
     add("whoami", cmd_whoami, "who you are signed in as")
+    add("projects", cmd_projects, "the projects you can see (* = the one you're working in)")
+    pj = add("project", cmd_project, "show the project you're working in, or `project use <id>` / `project clear`")
+    pj.add_argument("action", nargs="?", choices=["show", "use", "clear"], default="show")
+    pj.add_argument("project_id", nargs="?", metavar="project-id")
     project(add("unclaimed", cmd_unclaimed, "open tasks nobody is on"))
     add("who", cmd_who, "who is working on a task", task=True)
     add("context", cmd_context, "a task's neighbourhood: people, PRs and their latest comments", task=True)
@@ -446,7 +499,7 @@ def build_parser():
     tsub = t.add_subparsers(dest="task_cmd", required=True)
     add("claim", cmd_claim, "claim an existing task or subtask; it shows on your dashboard", task=True, under=tsub)
     add("release", cmd_release, "release a task you claimed; it comes off your dashboard", task=True, under=tsub)
-    c = add("create", cmd_task_create, "propose a SUBTASK of an existing task (an admin approves it)", under=tsub)
+    c = project(add("create", cmd_task_create, "propose a SUBTASK of an existing task (an admin approves it)", under=tsub))
     c.add_argument("parent", metavar="parent-task-id", help="the existing task it belongs under")
     c.add_argument("title", nargs="+")
     c.add_argument("-s", "--summary", required=True, help="what the subtask is and when it's done")
@@ -454,7 +507,7 @@ def build_parser():
     r.add_argument("title", nargs="+")
     r.add_argument("-d", "--description", required=True, help="what the task is and why it's worth doing")
     r.add_argument("--atomic-unit", help="the smallest unit of contribution someone could make")
-    r.add_argument("--project", default=config.DEFAULT_PROJECT)
+    project(r)
     add("proposals", cmd_task_proposals, "admins only: subtask proposals waiting for review", under=tsub)
     for name, fn, help in (("approve", cmd_task_approve, "admins only: create the proposed subtask"),
                            ("reject", cmd_task_reject, "admins only: decline a proposed subtask")):

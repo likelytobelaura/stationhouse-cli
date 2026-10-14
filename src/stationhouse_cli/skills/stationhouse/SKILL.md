@@ -1,6 +1,6 @@
 ---
 name: stationhouse
-description: See who is working on what in Station House projects (Conspiracy Bench, Consciousness Self-Attribution), find work, find PRs to review, see what's happening on a task, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I work on", "who is on X", "what's happening on X", "find me a PR to review", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
+description: See the Station House projects the contributor can see and who is working on what in them, find work, find PRs to review, see what's happening on a task, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I work on", "who is on X", "what's happening on X", "find me a PR to review", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
 ---
 
 # stationhouse: who is doing what
@@ -19,6 +19,8 @@ Never ask for, type, or store their password, and never try to sign in on their 
 Add `--json` for output you can parse.
 
 ```
+stationhouse projects                       the projects they can see (and which one they picked)
+stationhouse project [use <id> | clear]     show / pick / forget the project they work in
 stationhouse find-work [about words]        pick an open task for the contributor, with the reasons
 stationhouse explore "question"             ask about the tasks and who is on them (no question: explore mode)
 stationhouse task claim <task-id>           put the contributor on a task or subtask; it shows on their dashboard
@@ -39,11 +41,13 @@ stationhouse task proposals|approve|reject  admins only: review proposed subtask
 
 ## Projects
 
-There is more than one project. The default is Conspiracy Bench (`conspiracybench`); for
-Consciousness Self-Attribution add `--project llm-self-attribution` to `find-work`, `explore`,
-`unclaimed`, `prs` and `task request`. Commands that take a task id (`who`, `context`, `claim`, ...)
-work for a task of any project without it. If the contributor names a project, use it; if you aren't
-sure which they mean, ask.
+Station House has several projects, and tasks live inside them. Nothing is assumed: run
+`stationhouse projects --json` to see the ones the contributor can see (`current` is the one they
+picked, if any). Project-wide commands (`find-work`, `explore`, `unclaimed`, `prs`, `task request`)
+work in `--project <id>` if given, else the picked one, else the only one; with several and none
+picked they stop and ask, so pass `--project` when the contributor named one. Commands that take a
+task id (`who`, `context`, `claim`, `release`, `task create`) find the task's project themselves.
+Don't run `project use` on the contributor's behalf unless they ask; it changes their default.
 
 `stationhouse` with no command opens an interactive chat for people; don't run it bare (it waits for
 typing). Use the commands above, which give you the facts directly.

@@ -21,14 +21,14 @@ def test_requires_login_before_any_call(capsys):
 
 
 def test_unclaimed_human_and_json(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/tasks/unclaimed")] = (200, TASKS)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/unclaimed")] = (200, TASKS)
     code, out, _ = run(capsys, "unclaimed")
     assert code == 0 and "add-question  Add a question" in out and "Write one." in out
     # --json works before and after the subcommand
     for argv in (("--json", "unclaimed"), ("unclaimed", "--json")):
         _, out, _ = run(capsys, *argv)
         assert json.loads(out) == TASKS
-    assert api.calls[0]["path"] == "/api/v1/tasks/unclaimed?project=conspiracybench"
+    assert api.calls[0]["path"] == "/api/v1/projects/conspiracybench/unclaimed"
 
 
 def test_requests_carry_both_tokens(signed_in, api, capsys):
@@ -40,7 +40,7 @@ def test_requests_carry_both_tokens(signed_in, api, capsys):
 
 
 def test_who_lists_people_with_staleness(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/tasks/add-question/people")] = (200, PEOPLE)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks/add-question/people")] = (200, PEOPLE)
     _, out, _ = run(capsys, "who", "add-question")
     assert "ada  (active, #12)" in out and "bob  (stale)" in out
 
@@ -65,7 +65,7 @@ CONTEXT = {
 
 
 def test_context_shows_the_task_neighbourhood(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/tasks/add-question/context")] = (200, CONTEXT)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks/add-question/context")] = (200, CONTEXT)
     code, out, _ = run(capsys, "context", "add-question")
     assert code == 0
     assert "part of: dataset" in out and "subtask: add-question-es" in out
@@ -78,13 +78,13 @@ def test_context_shows_the_task_neighbourhood(signed_in, api, capsys):
 
 def test_context_for_a_task_nothing_has_touched(signed_in, api, capsys):
     empty = {**CONTEXT, "parent": None, "subtasks": [], "people": [], "threads": []}
-    api.routes[("GET", "/api/v1/tasks/add-question/context")] = (200, empty)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks/add-question/context")] = (200, empty)
     _, out, _ = run(capsys, "context", "add-question")
     assert "Nobody on it yet." in out and "PRs and discussions" not in out
 
 
 def test_prs_lists_what_needs_review(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/prs")] = (200, {"project": "conspiracybench", "prs": [
+    api.routes[("GET", "/api/v1/projects/conspiracybench/prs")] = (200, {"project": "conspiracybench", "prs": [
         {"repo": "Station-house/ConspiracyBench", "num": 258, "title": "Add pressure turns", "author": "vivek",
          "taskId": "expand-existing-questions", "reviewers": [],
          "url": "https://huggingface.co/spaces/Station-house/ConspiracyBench/discussions/258"},
@@ -94,33 +94,33 @@ def test_prs_lists_what_needs_review(signed_in, api, capsys):
     assert code == 0
     assert "#258  Add pressure turns  [expand-existing-questions]" in out and "by vivek, no review yet" in out
     assert "#260  Fix scorer" in out and "commented on by bob" in out
-    assert api.calls[0]["path"] == "/api/v1/prs?project=conspiracybench&limit=10"
+    assert api.calls[0]["path"] == "/api/v1/projects/conspiracybench/prs?limit=10"
 
 
 def test_claim_sends_only_the_task_and_lists_others(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}, {"hfUsername": "ada"}]})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (200, {"people": [{"hfUsername": "me", "you": True}, {"hfUsername": "ada"}]})
     code, out, _ = run(capsys, "claim", "add-question")
     assert code == 0 and "You're on add-question" in out and "ada" in out and "me " not in out
-    assert api.calls[0]["body"] == {"taskId": "add-question"}  # identity comes from the token, never the body
+    assert api.calls[0]["body"] is None  # the task is in the path; identity comes from the token, never the body
 
 
 def test_release_and_assign(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims/release")] = (200, {"ok": True})
-    api.routes[("POST", "/api/v1/claims/assign")] = (200, {"ok": True})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/release")] = (200, {"ok": True})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/assign")] = (200, {"ok": True})
     assert run(capsys, "release", "add-question")[0] == 0
     code, out, _ = run(capsys, "assign", "add-question", "@ada")
     assert code == 0 and "Assigned ada" in out
-    assert api.calls[-1]["body"] == {"taskId": "add-question", "hfUsername": "ada"}
+    assert api.calls[-1]["body"] == {"hfUsername": "ada"}
 
 
 def test_assign_refused_for_non_admin_shows_server_message(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims/assign")] = (403, {"error": "Admins only."})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/assign")] = (403, {"error": "Admins only."})
     code, _, err = run(capsys, "assign", "add-question", "ada")
     assert code == 1 and "Admins only." in err
 
 
 def test_claim_without_verified_handle_shows_server_message(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims")] = (409, {"error": "Verify your Hugging Face username first."})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (409, {"error": "Verify your Hugging Face username first."})
     code, _, err = run(capsys, "claim", "add-question")
     assert code == 1 and "Verify your Hugging Face username" in err
 

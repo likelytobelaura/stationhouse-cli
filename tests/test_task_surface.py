@@ -38,33 +38,33 @@ def run(capsys, *argv):
 
 @pytest.fixture
 def tree(signed_in, api):
-    api.routes[("GET", "/api/v1/tasks")] = (200, TREE)
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, TREE)
     return api
 
 
 # ---------------------------------------------------------------- task claim / release (and the dashboard card)
 
 def test_task_claim_says_the_card_is_on_the_dashboard(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}], "dashboard": "added"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (200, {"people": [{"hfUsername": "me", "you": True}], "dashboard": "added"})
     code, out, _ = run(capsys, "task", "claim", "add-question")
     assert code == 0 and "You're on add-question." in out and "on your dashboard now" in out
-    assert api.calls[0]["body"] == {"taskId": "add-question"}
+    assert api.calls[0]["body"] is None
 
 
 def test_task_claim_is_honest_when_the_card_didnt_land(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims")] = (200, {"people": [], "dashboard": "failed"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (200, {"people": [], "dashboard": "failed"})
     code, out, _ = run(capsys, "task", "claim", "add-question")
     assert code == 0 and "You're on add-question" in out and "couldn't put its card on your dashboard" in out
 
 
 def test_top_level_claim_still_works_against_an_older_server(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims")] = (200, {"people": [{"hfUsername": "me", "you": True}]})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/claim")] = (200, {"people": [{"hfUsername": "me", "you": True}]})
     code, out, _ = run(capsys, "claim", "add-question")
     assert code == 0 and "You're on add-question" in out and "dashboard" not in out
 
 
 def test_task_release_reports_the_card_coming_off(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/claims/release")] = (200, {"ok": True, "dashboard": "removed"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/release")] = (200, {"ok": True, "dashboard": "removed"})
     code, out, _ = run(capsys, "task", "release", "add-question")
     assert code == 0 and "Released add-question." in out and "Taken off your dashboard" in out
 
@@ -72,14 +72,14 @@ def test_task_release_reports_the_card_coming_off(signed_in, api, capsys):
 # ---------------------------------------------------------------- task create (subtask) / task request
 
 def test_task_create_proposes_a_subtask_and_says_an_admin_decides(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks")] = (201, {"proposalId": "cli:add-question:malformed-data", "created": True, "status": "PENDING"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/subtasks")] = (201, {"proposalId": "cli:add-question:malformed-data", "created": True, "status": "PENDING"})
     code, out, _ = run(capsys, "task", "create", "add-question", "Malformed", "data", "-s", "Tests for malformed input")
     assert code == 0 and "Proposed \"Malformed data\" as a subtask of add-question" in out and "admin has to approve" in out
-    assert api.calls[0]["body"] == {"parentTaskId": "add-question", "title": "Malformed data", "summary": "Tests for malformed input"}
+    assert api.calls[0]["body"] == {"title": "Malformed data", "summary": "Tests for malformed input"}
 
 
 def test_task_create_twice_says_nothing_new_was_filed(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks")] = (200, {"proposalId": "x", "created": False, "status": "PENDING"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/add-question/subtasks")] = (200, {"proposalId": "x", "created": False, "status": "PENDING"})
     code, out, _ = run(capsys, "task", "create", "add-question", "Malformed data", "-s", "s")
     assert code == 0 and "already proposed" in out and "Nothing new was filed" in out
 
@@ -93,27 +93,26 @@ def test_task_create_needs_a_summary_and_a_sane_parent_before_any_request(signed
 
 
 def test_task_create_shows_the_servers_reason_for_a_refusal(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks")] = (409, {"error": "\"x\" is itself a subtask of \"y\"; only one level of subtasks is supported."})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/tasks/x/subtasks")] = (409, {"error": "\"x\" is itself a subtask of \"y\"; only one level of subtasks is supported."})
     code, _, err = run(capsys, "task", "create", "x", "t", "-s", "s")
     assert code == 1 and "only one level" in err
 
 
 def test_task_request_files_a_top_level_request(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks/request")] = (201, {"requestId": "r", "created": True, "notified": True, "status": "PENDING"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/requests")] = (201, {"requestId": "r", "created": True, "notified": True, "status": "PENDING"})
     code, out, _ = run(capsys, "task", "request", "Multilingual", "set", "-d", "Run it in five languages", "--atomic-unit", "one language")
     assert code == 0 and "Requested \"Multilingual set\"" in out and "Warning" not in out
-    assert api.calls[0]["body"] == {"title": "Multilingual set", "description": "Run it in five languages",
-                                    "projectId": "conspiracybench", "atomicUnit": "one language"}
+    assert api.calls[0]["body"] == {"title": "Multilingual set", "description": "Run it in five languages", "atomicUnit": "one language"}
 
 
 def test_task_request_warns_when_the_maintainers_were_not_emailed(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks/request")] = (201, {"requestId": "r", "created": True, "notified": False, "status": "PENDING"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/requests")] = (201, {"requestId": "r", "created": True, "notified": False, "status": "PENDING"})
     code, out, _ = run(capsys, "task", "request", "Thing", "-d", "d")
     assert code == 0 and "recorded" in out and "email to the maintainers didn't go out" in out
 
 
 def test_task_request_twice(signed_in, api, capsys):
-    api.routes[("POST", "/api/v1/tasks/request")] = (200, {"requestId": "r", "created": False, "notified": False, "status": "PENDING"})
+    api.routes[("POST", "/api/v1/projects/conspiracybench/requests")] = (200, {"requestId": "r", "created": False, "notified": False, "status": "PENDING"})
     _, out, _ = run(capsys, "task", "request", "Thing", "-d", "d")
     assert "already requested" in out and "Warning" not in out
 
@@ -145,7 +144,7 @@ def test_explore_who_lists_the_people_on_the_task_it_matched(tree, capsys):
     assert code == 0 and out.startswith("scorer  Scorer hardening")
     assert "me (you) (active)" in out and "bob (stale)" in out
     assert "Proposed subtasks awaiting approval: Fuzzing (bob)" in out
-    assert tree.calls[0]["path"] == "/api/v1/tasks?project=conspiracybench"
+    assert tree.calls[0]["path"] == "/api/v1/projects/conspiracybench/tasks"
 
 
 def test_explore_what_is_a_person_on(tree, capsys):
@@ -220,7 +219,7 @@ def test_explore_mode_answers_several_questions_and_exits(tree, monkeypatch, cap
     code, out, _ = run(capsys, "explore", "--no-llm")
     assert code == 0 and "Explore mode" in out and "Reloaded 4 tasks." in out
     assert "bob (stale)" in out and "add-question-edge" in out
-    assert [c["path"].split("?")[0] for c in tree.calls] == ["/api/v1/tasks", "/api/v1/tasks"]  # once, plus the refresh
+    assert [c["path"].split("?")[0] for c in tree.calls] == ["/api/v1/projects/conspiracybench/tasks", "/api/v1/projects/conspiracybench/tasks"]  # once, plus the refresh
 
 
 def test_explore_mode_ends_cleanly_at_end_of_input(tree, monkeypatch, capsys):
@@ -254,7 +253,7 @@ def test_find_work_says_when_nothing_matches_and_still_offers_open_work(tree, ca
 
 
 def test_find_work_with_nothing_open_points_at_task_request(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/tasks")] = (200, {"project": "p", "you": "me", "tasks": [TREE["tasks"][3]]})
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, {"project": "p", "you": "me", "tasks": [TREE["tasks"][3]]})
     code, out, _ = run(capsys, "find-work")
     assert code == 0 and "Nothing open to pick up right now." in out and "task request" in out
 
@@ -321,7 +320,7 @@ def test_ask_local_without_ollama_returns_why_instead_of_raising():
 # ---------------------------------------------------------------- tasks people don't pick up (make-account)
 
 def test_find_work_and_unclaimed_explore_skip_tasks_the_server_says_arent_workable(signed_in, api, capsys):
-    api.routes[("GET", "/api/v1/tasks")] = (200, {**TREE, "tasks": TREE["tasks"] + [MAKE_ACCOUNT]})
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, {**TREE, "tasks": TREE["tasks"] + [MAKE_ACCOUNT]})
     _, out, _ = run(capsys, "find-work", "--limit", "10")
     assert "make-account" not in out and "add-question-edge" in out
     _, out, _ = run(capsys, "explore", "--no-llm", "what is unclaimed")
@@ -376,7 +375,7 @@ def test_agents_md_print_writes_nothing(tmp_path, monkeypatch, capsys):
 def test_the_agent_rules_cover_prs_projects_and_context(tmp_path, capsys):
     run(capsys, "agents-md", "--dir", str(tmp_path))
     text = (tmp_path / "AGENTS.md").read_text()
-    for needed in ("stationhouse prs", "--project llm-self-attribution", "stationhouse context", "A PR is not a task",
+    for needed in ("stationhouse prs", "stationhouse projects", "--project <id>", "stationhouse context", "A PR is not a task",
                    "Suggested: claim"):
         assert needed in text, needed
 

@@ -8,9 +8,12 @@ from .auth import current_credentials
 
 
 class ApiError(Exception):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, body: dict | None = None):
         super().__init__(message)
         self.status = status
+        # The server's JSON error body, e.g. {"error", "projectId", "taskId"} for a task asked for
+        # under the wrong project, so the caller can follow it.
+        self.body = body or {}
 
 
 def request(method: str, path: str, body: dict | None = None, query: dict | None = None):
@@ -27,21 +30,24 @@ def request(method: str, path: str, body: dict | None = None, query: dict | None
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read() or "null")
     except urllib.error.HTTPError as e:
-        raise ApiError(_message(e), e.code) from None
+        try:
+            body = json.loads(e.read())
+        except ValueError:
+            body = None
+        body = body if isinstance(body, dict) else {}
+        raise ApiError(_message(e.code, body), e.code, body) from None
     except urllib.error.URLError as e:
         raise ApiError(f"Couldn't reach {config.api_url()}: {e.reason}") from None
 
 
-def _message(e: urllib.error.HTTPError) -> str:
-    try:
-        body = json.loads(e.read())
-        text = body.get("error") or body.get("message")
-        if isinstance(text, dict):
-            text = text.get("message")
-    except (ValueError, AttributeError):
+def _message(code: int, body: dict) -> str:
+    text = body.get("error") or body.get("message")
+    if isinstance(text, dict):
+        text = text.get("message")
+    if not isinstance(text, str):
         text = None
-    if e.code == 401:
+    if code == 401:
         return text or "Not signed in, or your session expired. Run `stationhouse login`."
-    if e.code == 404 and not text:
+    if code == 404 and not text:
         return "This Station House server doesn't support that yet."
-    return text or f"The server answered {e.code}."
+    return text or f"The server answered {code}."

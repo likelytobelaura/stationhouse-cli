@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 
-from .config import config_dir, credentials_path
+from .config import config_dir, credentials_path, settings_path
 
 
 def save_credentials(creds: dict) -> None:
@@ -29,6 +29,28 @@ def load_credentials() -> dict | None:
         return None
     required = ("email", "access_token", "id_token", "refresh_token", "expires_at")
     return creds if isinstance(creds, dict) and all(k in creds for k in required) else None
+
+
+def load_settings() -> dict:
+    try:
+        settings = json.loads(settings_path().read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def save_settings(settings: dict) -> None:
+    d = config_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".settings-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(settings, f)
+        os.replace(tmp, settings_path())
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def clear_credentials() -> bool:

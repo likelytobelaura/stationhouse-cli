@@ -13,7 +13,8 @@ from .client import ApiError, request
 
 HELP = """Ask anything about the projects and tasks, e.g. "what could I work on?", "what's happening on add-question?".
 Commands start with /:
-  /who <task>  /context <task>  /claim <task>  /release <task>  /mine  /prs  /unclaimed  /find-work
+  /projects  /project use <id>  /who <task>  /context <task>  /claim <task>  /release <task>
+  /mine  /prs  /unclaimed  /find-work
   /login  /logout  /whoami  /clear (forget this conversation)  /help  /exit
 Any other `stationhouse` command works the same way after a /."""
 
@@ -27,11 +28,12 @@ OFFLINE_STATUSES = (404, 429, 502, 503)
 
 
 class Chat:
-    def __init__(self, project, run_command, fallback, ask=None, out=print, interactive=True):
-        """run_command(argv) runs a normal CLI command; fallback(question) prints the offline answer.
-        interactive=False (a one-shot question with no terminal, e.g. from a coding agent) prints
-        suggested claims as lines to act on instead of asking y/N."""
-        self.project, self.run_command, self.fallback = project, run_command, fallback
+    def __init__(self, project_fn, run_command, fallback, ask=None, out=print, interactive=True):
+        """project_fn() is the project you're working in, or None for all of them (read every turn, so
+        `/project use <id>` switches at once); run_command(argv) runs a normal CLI command;
+        fallback(question) prints the offline answer. interactive=False (a one-shot question with no
+        terminal, e.g. from a coding agent) prints suggested claims as lines to act on instead of asking y/N."""
+        self.project_fn, self.run_command, self.fallback = project_fn, run_command, fallback
         self.interactive = interactive
         # input is looked up per call, not bound here, so readline and tests see the real one.
         self.ask = ask or (lambda prompt="": input(prompt))
@@ -73,7 +75,7 @@ class Chat:
             return
         messages = (self.history + [{"role": "user", "text": question}])[-MAX_MESSAGES:]
         try:
-            res = request("POST", "/api/v1/agent/chat", {"messages": messages, "project": self.project})
+            res = request("POST", "/api/v1/agent/chat", {"messages": messages, "project": self.project_fn()})
         except AuthError:
             self.out("You aren't signed in. Type /login, then ask again.")
             return
