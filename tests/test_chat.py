@@ -95,6 +95,18 @@ def test_one_shot_question(signed_in, api, capsys, monkeypatch):
     assert chat_calls(api)[0]["body"]["messages"] == [{"role": "user", "text": "what next?"}]
 
 
+def test_one_shot_from_an_agent_prints_the_suggestion_and_changes_nothing(signed_in, api, capsys, monkeypatch):
+    # A coding agent runs it with no terminal: no y/N prompt to hang on, just a line to act on.
+    api.routes[("POST", "/api/v1/agent/chat")] = (200, REPLY)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    asked = typing(monkeypatch)
+    code = cli.main(["chat", "what could I work on?"])
+    out = capsys.readouterr().out
+    assert code == 0 and asked == []
+    assert "Suggested: claim add-question" in out and "stationhouse claim add-question" in out
+    assert not [c for c in api.calls if c["path"] == "/api/v1/claims"]
+
+
 def test_signed_out_is_told_to_log_in(api, capsys, monkeypatch):
     typing(monkeypatch, "hello")
     cli.main([])

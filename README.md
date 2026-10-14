@@ -53,8 +53,12 @@ its monthly budget, you get the offline `explore` answer instead.
 ## Using it from a coding agent
 
 ```bash
-stationhouse skills-install   # copies the skill to ~/.claude/skills/stationhouse
+stationhouse skills-install   # Claude Code: copies the skill to ~/.claude/skills/stationhouse
+stationhouse agents-md        # Codex, Cursor and others: writes the same rules into ./AGENTS.md
 ```
+
+`agents-md` adds a marked section to the project's `AGENTS.md` and leaves the rest of the file alone;
+run it again after upgrading to refresh the section (`--print` shows it without writing).
 
 Then ask your agent "what should I work on?" It runs `unclaimed`, reads the summaries, and suggests
 a task. It claims only after you agree. **You sign in yourself**: the skill tells the agent to ask

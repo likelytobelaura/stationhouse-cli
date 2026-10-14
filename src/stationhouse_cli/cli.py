@@ -348,8 +348,9 @@ def _run_in_chat(argv):
 def cmd_chat(args):
     if args.json:
         raise ApiError("Chat is interactive; for machine-readable output use the other commands with --json.")
-    session = chat.Chat(args.project, _run_in_chat, _offline_answer(args.project))
     question = " ".join(args.message).strip()
+    session = chat.Chat(args.project, _run_in_chat, _offline_answer(args.project),
+                        interactive=not question or sys.stdin.isatty())
     if question:
         session.turn(question)
         return
@@ -372,6 +373,37 @@ def cmd_skills_install(args):
     with resources.as_file(src / "SKILL.md") as f:
         shutil.copyfile(f, target / "SKILL.md")
     print(f"Installed the stationhouse skill to {target}")
+
+
+AGENTS_BEGIN = "<!-- stationhouse:begin (written by `stationhouse agents-md`; edits inside are replaced) -->"
+AGENTS_END = "<!-- stationhouse:end -->"
+
+
+def agents_section() -> str:
+    """The usage rules for any coding agent, from the same source as the Claude Code skill (frontmatter dropped)."""
+    text = (resources.files("stationhouse_cli") / "skills" / "stationhouse" / "SKILL.md").read_text()
+    body = text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
+    return f"{AGENTS_BEGIN}\n{body}\n{AGENTS_END}\n"
+
+
+def with_section(existing: str, section: str) -> str:
+    """`existing` with our section added, or replaced in place if it is already there. Nothing outside it changes."""
+    start = existing.find(AGENTS_BEGIN)
+    end = existing.find(AGENTS_END, start) if start != -1 else -1
+    if start != -1 and end != -1:
+        return existing[:start] + section + existing[end + len(AGENTS_END):].lstrip("\n")
+    return (existing.rstrip() + "\n\n" if existing.strip() else "") + section
+
+
+def cmd_agents_md(args):
+    if args.print:
+        print(agents_section(), end="")
+        return
+    path = Path(args.dir).expanduser() / "AGENTS.md"
+    existing = path.read_text() if path.exists() else ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(with_section(existing, agents_section()))
+    print(f"{'Updated' if existing else 'Wrote'} the stationhouse section of {path}")
 
 
 def build_parser():
@@ -434,7 +466,10 @@ def build_parser():
     w = project(add("find-work", cmd_find_work, "pick an open task for you to do", aliases=["work"]))
     w.add_argument("about", nargs="*", help="what you're into, e.g. adversarial prompts")
     w.add_argument("--limit", type=int, default=3, help="how many tasks to suggest (default 3)")
-    add("skills-install", cmd_skills_install, "install the agent skill").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
+    add("skills-install", cmd_skills_install, "install the agent skill (Claude Code)").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
+    am = add("agents-md", cmd_agents_md, "write the usage rules into AGENTS.md for other coding agents (Codex, Cursor, ...)")
+    am.add_argument("--dir", default=".", help="project directory (default: here)")
+    am.add_argument("--print", action="store_true", help="print the section instead of writing a file")
     return p
 
 
