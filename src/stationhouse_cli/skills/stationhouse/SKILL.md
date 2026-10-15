@@ -1,6 +1,6 @@
 ---
 name: stationhouse
-description: See the Station House projects the contributor can see and who is working on what in them, find work, find PRs to review, see what's happening on a task, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I work on", "who is on X", "what's happening on X", "find me a PR to review", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
+description: See the Station House projects the contributor can see and who is working on what in them, find work, find PRs to review, see what's waiting on them (feedback on their PRs, replies, mentions), see what's happening on a task, claim or release a task, propose a subtask, or request a new task for the signed-in contributor, using the `stationhouse` CLI. Use when asked "what should I do", "what should I work on", "anything waiting on me", "who is on X", "what's happening on X", "find me a PR to review", "claim X", "add a subtask to X", "can we have a task for Y", or "am I on anything".
 ---
 
 # stationhouse: who is doing what
@@ -25,6 +25,8 @@ Add `--json` for output you can parse.
 ```
 stationhouse projects                       the projects they can see (and which one they picked)
 stationhouse project [use <id> | clear]     show / pick / forget the project they work in
+stationhouse inbox                          PRs and discussions waiting on the contributor: feedback, replies, mentions
+stationhouse inbox done <#number>           mark one handled (it comes back if someone comments again)
 stationhouse find-work [about words]        pick an open task for the contributor, with the reasons
 stationhouse explore "question"             which tasks a question is about, and who is on them (a lookup; no model)
 stationhouse task claim <task-id>           put the contributor on a task or subtask; it shows on their dashboard
@@ -56,6 +58,16 @@ Always run one of the commands above, spelled exactly. `stationhouse` on its own
 chat`/`ask`, or words that aren't a command (`stationhouse what should I do?`) go to the people's
 assistant instead: a bare `stationhouse` waits for typing, and the others spend a model call to tell
 you less than the JSON does.
+
+## Follow-ups come first
+
+When the contributor asks what to do (or what's next, or what needs them), run `stationhouse inbox
+--json` before anything else. Each item is a PR or discussion where someone is waiting on them:
+`kind` is `pr-feedback` (feedback on their own open PR), `mention` or `reply`; `from`, `count`,
+`latest` and `url` say who, how much and where. If there are any, lead with "do these follow-ups
+first", most urgent first, with the link and what to do (answer the review, push a fix, reply).
+Only then pick new work. Items clear themselves when the PR is merged or closed or once the
+contributor answers on it; run `inbox done <#number>` only when they say it's handled some other way.
 
 ## Picking work
 

@@ -14,7 +14,7 @@ from .client import ApiError, request
 HELP = """Ask anything about the projects and tasks, e.g. "what could I work on?", "what's happening on add-question?".
 Commands start with /:
   /projects  /project use <id>  /who <task>  /context <task>  /claim <task>  /release <task>
-  /mine  /prs  /unclaimed  /find-work
+  /inbox (what's waiting on you)  /inbox done <#number>  /mine  /prs  /unclaimed  /find-work
   /login  /logout  /whoami  /clear (forget this conversation)  /help  /exit
 Any other `stationhouse` command works the same way after a /."""
 

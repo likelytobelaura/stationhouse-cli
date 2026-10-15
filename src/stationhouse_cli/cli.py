@@ -9,7 +9,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, explore as explore_mod, projects, train, work
+from . import __version__, chat, explore as explore_mod, inbox, projects, train, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -186,6 +186,19 @@ def cmd_mine(args):
             title = f"  {c['title']}" if c.get("title") else ""
             print(f"{where}{c['taskId']}{title}  ({c.get('status', 'ACTIVE').lower()}{', stale' if c.get('stale') else ''})")
     _emit(args, out, human)
+
+
+def cmd_inbox(args):
+    # Everything waiting on you unless a project is named or picked: a reply doesn't care which project you're in.
+    project = projects.chosen(args.project)
+    if args.action == "done":
+        if not args.target:
+            raise ApiError("Which one? stationhouse inbox done <#number>  (see `stationhouse inbox`)")
+        item = inbox.done(project, args.target)
+        _emit(args, {"done": item["id"]}, lambda d: print(
+            f"Marked #{item['num']} done. It comes back if someone comments again."))
+        return
+    _emit(args, inbox.fetch(project), inbox.render)
 
 
 CARD_ADDED = {
@@ -382,7 +395,19 @@ def cmd_chat(args):
     chat.run(session, "Station House. Ask about the projects and tasks, or what to work on next. "
                       "/help lists commands, /exit leaves."
                       + (f"\nWorking in {where} (/project use <id> to switch)." if where else "\nAll your projects (/project use <id> to focus on one).")
-                      + ("" if signed_in else "\nYou aren't signed in yet: type /login first."))
+                      + ("" if signed_in else "\nYou aren't signed in yet: type /login first.")
+                      + (_inbox_line(where) if signed_in else ""))
+
+
+def _inbox_line(project):
+    """The chat greeting's nudge when something is waiting on you; nothing if not, or if it can't tell."""
+    try:
+        n = len(inbox.fetch(project).get("followUps") or [])
+    except (AuthError, ApiError):
+        return ""
+    if not n:
+        return ""
+    return f"\n{n} follow-up{'s are' if n != 1 else ' is'} waiting on you: /inbox to see {'them' if n != 1 else 'it'}."
 
 
 def cmd_assign(args):
@@ -481,6 +506,10 @@ def build_parser():
     add("who", cmd_who, "who is working on a task", task=True)
     add("context", cmd_context, "a task's neighbourhood: people, PRs and their latest comments", task=True)
     add("mine", cmd_mine, "tasks you have claimed")
+    ib = project(add("inbox", cmd_inbox, "PRs and discussions waiting on you: feedback, replies, mentions",
+                     aliases=["follow-ups", "todo"]))
+    ib.add_argument("action", nargs="?", choices=["list", "done"], default="list")
+    ib.add_argument("target", nargs="?", metavar="number", help="with `done`: the PR/discussion number (or its full id)")
     pr = project(add("prs", cmd_prs, "open PRs waiting for a review (not your own), unreviewed first"))
     pr.add_argument("--limit", type=int, default=10)
     add("claim", cmd_claim, "claim a task (same as `task claim`)", task=True)
@@ -529,7 +558,7 @@ def _command_names(parser) -> set[str]:
 # Commands a question can start with ("who is on the scorer?", "claim the scorer task for me"): when
 # what follows doesn't parse as the command, it's a question. Commands with free text or required
 # options (task, explore, assign, ...) always get their own error instead.
-QUESTION_STARTERS = {"who", "context", "claim", "release", "mine", "projects", "project", "unclaimed", "prs", "whoami"}
+QUESTION_STARTERS = {"who", "context", "claim", "release", "mine", "projects", "project", "unclaimed", "prs", "whoami", "inbox", "todo"}
 
 
 def _parse(parser, argv, questions=True):
