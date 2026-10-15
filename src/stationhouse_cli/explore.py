@@ -101,13 +101,19 @@ def live(tasks: list[dict]) -> list[dict]:
     return [t for t in tasks if t["available"] and not t["closed"] and t.get("workable", True)]
 
 
+def claimers(task: dict) -> list[dict]:
+    """The people working on it: claims only (an older server doesn't say, so everyone counts there)."""
+    return [p for p in task["people"] if p.get("claimed", True)]
+
+
 def render_people(task: dict) -> str:
-    if not task["people"]:
-        return "nobody yet"
-    return ", ".join(
+    on = claimers(task)
+    watching = len(task["people"]) - len(on)
+    text = ", ".join(
         f"{p['hfUsername']}{' (you)' if p.get('you') else ''} ({'stale' if p.get('stale') else 'active'}"
         + (", " + ", ".join(f"#{n}" for n in p["prNums"]) if p.get("prNums") else "") + ")"
-        for p in task["people"])
+        for p in on) or "nobody yet"
+    return text + (f"; {watching} more have it on their dashboard" if watching else "")
 
 
 def render_task(task: dict, by_id: dict[str, dict]) -> str:
@@ -140,11 +146,11 @@ def explore(question: str, tree: dict) -> dict:
                 if hits else f"I don't see {', '.join(handles)} on any task.")
         chosen = hits
     elif kind == "mine":
-        chosen = [t for t in tasks if t["mine"]]
+        chosen = [t for t in tasks if t.get("claimedByYou", t["mine"])]  # claimed, not just on your dashboard
         note = f"You're on {len(chosen)} task{'s' if len(chosen) != 1 else ''}." if chosen else (
             "You aren't on any task." + ("" if tree.get("you") else " (No verified Hugging Face username on your account, so I can't tell.)"))
     elif kind == "unclaimed":
-        chosen = [t for t in live(tasks) if not t["people"]]
+        chosen = [t for t in live(tasks) if not claimers(t)]
         topical = [t for _, t in rank(question, chosen)]  # "what scoring work is unclaimed": only those about scoring
         if topical:
             chosen = topical
