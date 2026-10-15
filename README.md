@@ -32,6 +32,8 @@ stationhouse who <task-id>    # who is on a task, active or stale
 stationhouse context <task-id>  # the task's neighbourhood: people, its PRs/discussions and their latest comments
 stationhouse claim <task-id>  # put yourself on it
 stationhouse release <task-id>
+stationhouse inbox            # PRs and discussions waiting on you: feedback, replies, mentions
+stationhouse inbox done 348   # mark one handled (it comes back if someone comments again)
 stationhouse mine
 stationhouse prs              # open PRs waiting for a review (not yours), unreviewed first
 ```
