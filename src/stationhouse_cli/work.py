@@ -7,9 +7,17 @@ from .explore import rank
 
 
 def _live_others(task: dict) -> tuple[int, int]:
-    others = [p for p in task["people"] if not p.get("you")]
+    """Other people working on it: claims only. Someone who just has the task on their dashboard
+    (`claimed: false`) isn't working it. An older server doesn't say, so everyone counts there."""
+    others = [p for p in task["people"] if not p.get("you") and p.get("claimed", True)]
     stale = sum(1 for p in others if p.get("stale"))
     return len(others) - stale, stale
+
+
+def _yours(task: dict) -> bool:
+    """You've claimed it. Having it on your dashboard (`mine` without `claimedByYou`) doesn't count;
+    an older server only sends `mine`."""
+    return task.get("claimedByYou", task["mine"])
 
 
 def suggest(tree: dict, about: str = "", limit: int = 3) -> dict:
@@ -23,7 +31,9 @@ def suggest(tree: dict, about: str = "", limit: int = 3) -> dict:
     by_id = {t["taskId"]: t for t in tasks}
     # `workable` is the platform's own word for "people can pick this up" (it leaves out tasks like
     # make-account that sign-up finishes); an older server doesn't send it, so absent means yes.
-    candidates = [t for t in tasks if t["available"] and not t["closed"] and t.get("workable", True) and not t["mine"]]
+    # A daily task (`recurring`, e.g. review a PR) is never taken: it's offered whoever else does it.
+    candidates = [t for t in tasks if t["available"] and not t["closed"] and t.get("workable", True) and not _yours(t)
+                  and (t.get("recurring") or not t.get("full"))]
     relevance: dict[str, float] = {}
     matched = True
     if about.strip():
@@ -38,7 +48,10 @@ def suggest(tree: dict, about: str = "", limit: int = 3) -> dict:
     for t in candidates:
         score, reasons = 0.0, []
         live_n, stale_n = _live_others(t)
-        if live_n == 0 and stale_n == 0:
+        if t.get("recurring"):
+            score += 2.5
+            reasons.append("a daily task: worth doing any day, however many others do it too")
+        elif live_n == 0 and stale_n == 0:
             score += 3.0
             reasons.append("nobody is on it yet")
         elif live_n == 0:

@@ -60,7 +60,10 @@ you less than the JSON does.
 ## Picking work
 
 1. `stationhouse find-work --json` (add what the contributor is into, e.g. `find-work adversarial prompts`).
-   Say which task you'd pick and why, using the `reasons`.
+   Say which task you'd pick and why, using the `reasons`. Daily tasks (`recurring`, like reviewing a
+   PR) are always worth offering. In task lists, a person with `claimed: false` only has the task on
+   their dashboard, which isn't working on it; the contributor has claimed a task when `claimedByYou`
+   is true (`mine` also covers their dashboard).
 2. `stationhouse who <task-id>` before claiming; if others are on it, mention them so the
    contributor can coordinate.
 3. **Claim only after the contributor agrees.** A claim is recorded under their name.

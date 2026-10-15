@@ -297,3 +297,40 @@ def test_the_agent_rules_cover_prs_projects_and_context(tmp_path, capsys):
 
 def test_agents_md_needs_no_sign_in(tmp_path, capsys):
     assert run(capsys, "agents-md", "--dir", str(tmp_path))[0] == 0
+
+
+# ---------------------------------------------------------------- live test, 2026-10-14: dashboards aren't claims
+
+def _node(task_id, **kw):
+    base = {"taskId": task_id, "title": task_id.replace("-", " ").title(), "parentTaskId": None, "childTaskIds": [],
+            "summary": "", "scope": [], "completionCriteria": "", "available": True, "closed": False, "workable": True,
+            "people": [], "mine": False, "claimedByYou": False, "recurring": False, "full": False, "pendingSubtasks": []}
+    return {**base, **kw}
+
+
+ME_ON_DASHBOARD = {"hfUsername": "me", "stale": False, "claimed": False, "you": True}
+CROWD = [{"hfUsername": f"m{i}", "stale": False, "claimed": False} for i in range(59)]
+DASHBOARD_TREE = {"project": "conspiracybench", "you": "me", "tasks": [
+    _node("judge-injection-guard", mine=True, people=[ME_ON_DASHBOARD, {"hfUsername": "ada", "stale": False, "claimed": True}]),
+    _node("daily-pr-review", mine=True, recurring=True, people=[ME_ON_DASHBOARD, *CROWD]),
+    _node("csa-task-i-claimed", mine=True, claimedByYou=True, people=[{**ME_ON_DASHBOARD, "claimed": True}]),
+]}
+
+
+def test_find_work_offers_dashboard_tasks_and_daily_ones(signed_in, api, capsys):
+    # The account had nearly every task on its dashboard, so find-work offered nothing; and the daily
+    # "review a PR" task, on everyone's dashboard, was never offered to anyone.
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, DASHBOARD_TREE)
+    _, out, _ = run(capsys, "find-work", "--json")
+    picks = json.loads(out)["picks"]
+    assert [p["taskId"] for p in picks] == ["daily-pr-review", "judge-injection-guard"]
+    assert "daily task" in " ".join(picks[0]["reasons"]) and "59" not in " ".join(picks[0]["reasons"])
+    assert "1 person is already on it" in " ".join(picks[1]["reasons"])  # ada's claim; your dashboard doesn't count
+
+
+def test_explore_tells_claims_from_dashboards(signed_in, api, capsys):
+    api.routes[("GET", "/api/v1/projects/conspiracybench/tasks")] = (200, DASHBOARD_TREE)
+    _, out, _ = run(capsys, "explore", "what am I working on")
+    assert "You're on 1 task." in out and "csa-task-i-claimed" in out and "judge-injection-guard" not in out
+    _, out, _ = run(capsys, "explore", "what is unclaimed")
+    assert "daily-pr-review" in out and "60 more have it on their dashboard" in out  # 59 others plus you
