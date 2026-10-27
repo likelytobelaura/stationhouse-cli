@@ -103,7 +103,10 @@ request's `EXPERIMENT.md` directly. Projects keep their own controls and traps i
 `CONTRIBUTING.md`; the headings are the same everywhere, so `check` works on any of them, including a
 PR description with a `## Design` section.
 
-`check` is plain text rules with no model: it catches a missing piece, not a bad idea. For the
+`check` is plain text rules with no model: it catches a missing piece, not a bad idea. ConspiracyBench
+and the Marin Neuron Hunt require it to pass before an experiment request is merged; each repo
+carries the same rules as `scripts/check_design.py` (the hunt runs it in CI), so keep them in sync
+when the rules here change. For the
 thinking, use `review`, or your coding agent with the `experiment-design` skill (below): it walks you
 through the stages one at a time, asks rather than fills in, and red-teams the design before you run
 it. `review` sends the design as one assistant question (at most 4,000 characters; a longer file is
