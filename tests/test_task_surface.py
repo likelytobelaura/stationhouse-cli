@@ -259,7 +259,8 @@ def test_agents_md_writes_the_usage_rules_without_the_skill_frontmatter(tmp_path
     code, out, _ = run(capsys, "agents-md", "--dir", str(tmp_path))
     text = (tmp_path / "AGENTS.md").read_text()
     assert code == 0 and "Wrote" in out
-    assert text.startswith("<!-- stationhouse:begin") and text.rstrip().endswith("<!-- stationhouse:end -->")
+    assert text.startswith("<!-- stationhouse:begin") and "<!-- stationhouse:end -->" in text
+    assert text.rstrip().endswith("<!-- stationhouse-design:end -->")  # the experiment-design rules follow
     assert "stationhouse find-work" in text and "Claim only after the contributor agrees" in text.replace("**", "")
     assert "name: stationhouse" not in text  # the Claude Code frontmatter is dropped
 

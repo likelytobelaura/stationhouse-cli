@@ -10,7 +10,7 @@ from datetime import datetime
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, explore as explore_mod, inbox, projects, train, work
+from . import __version__, chat, design, explore as explore_mod, inbox, projects, train, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -503,45 +503,137 @@ def cmd_train(args):
         print()
 
 
+def _design_file(path: str) -> Path:
+    p = Path(path).expanduser()
+    return p if p.suffix.lower() == ".md" else p / "DESIGN.md"
+
+
+def cmd_design_new(args):
+    path = _design_file(args.path)
+    if path.exists() and not args.force:
+        raise ApiError(f"{path} already exists. Work in it, or pass --force to start it over.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(design.template())
+    _emit(args, {"path": str(path)}, lambda d: print(
+        f"Wrote {path}. Fill in each section before you run anything, then: stationhouse design check {path}"))
+
+
+def _read_design(path: str) -> tuple[Path, str]:
+    p = _design_file(path)
+    if not p.is_file():
+        raise ApiError(f"{p} doesn't exist. Start one with: stationhouse design new {path}")
+    return p, p.read_text()
+
+
+def _print_findings(path, findings):
+    errors = [f for f in findings if f["level"] == "error"]
+    if not findings:
+        print(f"{path}: all six stages are filled in and nothing obvious is missing.")
+        print("That's the floor, not a review: next, stationhouse design review " + str(path))
+        return
+    for f in findings:
+        print(f"{f['level']}: {f['section']}: {f['message']}")
+    print(f"\n{len(errors)} error(s), {len(findings) - len(errors)} warning(s)."
+          + (" Fix the errors before running anything." if errors else " Keep a warning only if the file says why."))
+
+
+def cmd_design_check(args):
+    path, text = _read_design(args.path)
+    findings = design.check(text)
+    errors = sum(f["level"] == "error" for f in findings)
+    _emit(args, {"path": str(path), "ready": not errors, "findings": findings},
+          lambda d: _print_findings(path, findings))
+    return 1 if errors else 0
+
+
+def cmd_design_guide(args):
+    _emit(args, {"guide": design.guide(), "template": design.template()}, lambda d: print(d["guide"]))
+
+
+def cmd_design_review(args):
+    path, text = _read_design(args.path)
+    findings = design.check(text)
+    question, truncated = design.review_question(text, chat.MAX_QUESTION)
+    try:
+        res = request("POST", "/api/v1/agent/chat",
+                      {"messages": [{"role": "user", "text": question}], "project": projects.chosen(args.project)})
+        reply = (res or {}).get("reply") or "(no reply)"
+    except ApiError as e:
+        if e.status not in chat.OFFLINE_STATUSES and e.status is not None:
+            raise
+        reply = None
+        why = str(e)
+
+    def human(_d):
+        if findings:
+            _print_findings(path, findings)
+            print()
+        if truncated:
+            print("(The design is longer than the assistant takes in one question, so it saw the six stages only, cut to fit.)\n")
+        if reply is None:
+            print(f"The assistant can't review it right now ({why}). The checks above still apply; a coding agent "
+                  "can review it too (it gets the method from `stationhouse design guide`).")
+        else:
+            print(reply)
+    _emit(args, {"path": str(path), "findings": findings, "truncated": truncated, "review": reply}, human)
+
+
+SKILLS = ("stationhouse", "experiment-design")
+
+
 def cmd_skills_install(args):
     dest = Path(args.dir).expanduser() if args.dir else Path.home() / ".claude" / "skills"
-    src = resources.files("stationhouse_cli") / "skills" / "stationhouse"
-    target = dest / "stationhouse"
-    target.mkdir(parents=True, exist_ok=True)
-    with resources.as_file(src / "SKILL.md") as f:
-        shutil.copyfile(f, target / "SKILL.md")
-    print(f"Installed the stationhouse skill to {target}")
+    for name in SKILLS:
+        src = resources.files("stationhouse_cli") / "skills" / name
+        target = dest / name
+        target.mkdir(parents=True, exist_ok=True)
+        for f in src.iterdir():
+            if f.name.endswith(".md"):
+                with resources.as_file(f) as real:
+                    shutil.copyfile(real, target / f.name)
+        print(f"Installed the {name} skill to {target}")
 
 
 AGENTS_BEGIN = "<!-- stationhouse:begin (written by `stationhouse agents-md`; edits inside are replaced) -->"
 AGENTS_END = "<!-- stationhouse:end -->"
+# One marked section per skill, so each is refreshed in place on its own.
+MARKERS = {
+    "stationhouse": (AGENTS_BEGIN, AGENTS_END),
+    "experiment-design": ("<!-- stationhouse-design:begin (written by `stationhouse agents-md`; edits inside are replaced) -->",
+                          "<!-- stationhouse-design:end -->"),
+}
 
 
-def agents_section() -> str:
+def agents_section(skill: str = "stationhouse") -> str:
     """The usage rules for any coding agent, from the same source as the Claude Code skill (frontmatter dropped)."""
-    text = (resources.files("stationhouse_cli") / "skills" / "stationhouse" / "SKILL.md").read_text()
+    text = (resources.files("stationhouse_cli") / "skills" / skill / "SKILL.md").read_text()
     body = text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
-    return f"{AGENTS_BEGIN}\n{body}\n{AGENTS_END}\n"
+    begin, end = MARKERS[skill]
+    return f"{begin}\n{body}\n{end}\n"
 
 
-def with_section(existing: str, section: str) -> str:
+def with_section(existing: str, section: str, begin: str = AGENTS_BEGIN, end_marker: str = AGENTS_END) -> str:
     """`existing` with our section added, or replaced in place if it is already there. Nothing outside it changes."""
-    start = existing.find(AGENTS_BEGIN)
-    end = existing.find(AGENTS_END, start) if start != -1 else -1
+    start = existing.find(begin)
+    end = existing.find(end_marker, start) if start != -1 else -1
     if start != -1 and end != -1:
-        return existing[:start] + section + existing[end + len(AGENTS_END):].lstrip("\n")
+        rest = existing[end + len(end_marker):].lstrip("\n")
+        return existing[:start] + section + ("\n" + rest if rest else "")
     return (existing.rstrip() + "\n\n" if existing.strip() else "") + section
 
 
 def cmd_agents_md(args):
     if args.print:
-        print(agents_section(), end="")
+        print("\n".join(agents_section(name) for name in SKILLS), end="")
         return
     path = Path(args.dir).expanduser() / "AGENTS.md"
     existing = path.read_text() if path.exists() else ""
+    text = existing
+    for name in SKILLS:
+        text = with_section(text, agents_section(name), *MARKERS[name])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(with_section(existing, agents_section()))
-    print(f"{'Updated' if existing else 'Wrote'} the stationhouse section of {path}")
+    path.write_text(text)
+    print(f"{'Updated' if existing else 'Wrote'} the stationhouse sections of {path}")
 
 
 def build_parser():
@@ -627,6 +719,17 @@ def build_parser():
             sp.add_argument("note", nargs="*", help="optional: what you'll test (up to 140 characters)")
     add("mine", cmd_neuron_mine, "the neurons you hold", under=nsub)
 
+    d = sub.add_parser("design", help="design an experiment before you run it: template, checks, review")
+    dsub = d.add_subparsers(dest="design_cmd", required=True)
+    dn = add("new", cmd_design_new, "write a DESIGN.md with the six stages to fill in", under=dsub)
+    dn.add_argument("path", nargs="?", default=".", help="a folder (gets DESIGN.md) or a .md file, e.g. EXPERIMENT.md")
+    dn.add_argument("--force", action="store_true", help="overwrite an existing file")
+    add("check", cmd_design_check, "check a design file: every stage filled in, a baseline named, ... (no model)",
+        under=dsub).add_argument("path", nargs="?", default=".", help="the design file, or its folder")
+    add("guide", cmd_design_guide, "how to design one, stage by stage", under=dsub)
+    project(add("review", cmd_design_review, "ask the Station House assistant to critique a design (signed in)",
+                under=dsub)).add_argument("path", nargs="?", default=".", help="the design file, or its folder")
+
     e = project(add("explore", cmd_explore, "for agents/scripts: which tasks a question is about and who is on them (no model)"))
     e.add_argument("question", nargs="*", help="e.g. who is working on the scorer?")
     # explore no longer uses a local model at all; the flag is still accepted so old scripts don't break.
@@ -635,7 +738,7 @@ def build_parser():
     w.add_argument("about", nargs="*", help="what you're into, e.g. adversarial prompts")
     w.add_argument("--limit", type=int, default=3, help="how many tasks to suggest (default 3)")
     add("train", cmd_train, "watch the welcome train again")
-    add("skills-install", cmd_skills_install, "install the agent skill (Claude Code)").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
+    add("skills-install", cmd_skills_install, "install the agent skills (Claude Code)").add_argument("--dir", help="skills directory (default ~/.claude/skills)")
     am = add("agents-md", cmd_agents_md, "write the usage rules into AGENTS.md for other coding agents (Codex, Cursor, ...)")
     am.add_argument("--dir", default=".", help="project directory (default: here)")
     am.add_argument("--print", action="store_true", help="print the section instead of writing a file")
@@ -694,7 +797,7 @@ def main(argv=None, questions=True):
     if args.fn is not cmd_train:
         train.welcome(bool(getattr(args, "json", False)))
     try:
-        args.fn(args)
+        code = args.fn(args)
     except (AuthError, ApiError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -704,7 +807,7 @@ def main(argv=None, questions=True):
         return 1
     except KeyboardInterrupt:
         return 130
-    return 0
+    return code or 0
 
 
 if __name__ == "__main__":
