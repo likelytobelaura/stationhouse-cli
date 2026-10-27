@@ -40,9 +40,16 @@ stationhouse mine                           the contributor's own claims
 stationhouse prs [--project P]              open PRs waiting for a review (not the contributor's own), unreviewed first
 stationhouse assign <task-id> <hf-handle>   admins only
 stationhouse task proposals|approve|reject  admins only: review proposed subtasks
+stationhouse neuron claim <L40-N25546> [note]  Marin Neuron Atlas: hold a neuron so nobody else takes it
+stationhouse neuron who|renew|release <id>  who holds it; restart its 7 days; give it up
+stationhouse neuron mine                    the neurons the contributor holds (at most 5)
 ```
 
 `claim` and `release` also work without `task`.
+
+Neurons are different from tasks: one person holds a neuron at a time. Before explaining a Marin neuron,
+run `neuron claim` on it; a 409 means someone else holds it, so pick another. A claim lapses 7 days after its
+last activity unless a PR for it is open, and needs the contributor's GitHub verified on their profile.
 
 ## Projects
 

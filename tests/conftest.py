@@ -50,7 +50,7 @@ class FakeApi:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
-            do_GET = do_POST = _handle
+            do_GET = do_POST = do_PUT = do_DELETE = _handle
 
             def log_message(self, *a):
                 pass
