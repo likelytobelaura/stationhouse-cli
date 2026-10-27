@@ -25,11 +25,13 @@ PLACEHOLDER = re.compile(r"\b(TODO|TBD|FIXME)\b|^\s*\.\.\.\s*$", re.M)
 
 BASELINE = re.compile(r"baseline|random|shuffl|constant|majority|chance|carry[- ]forward|copy|untrained|base model|"
                       r"null model|placebo|no[- ]op|ablat|prior|naive|always[- ]", re.I)
-VERSION = re.compile(r"\b[0-9a-f]{7,64}\b|commit|sha|hash|version|v\d|revision|@\s*\w|\d{4}-\d{2}-\d{2}", re.I)
-SPLIT = re.compile(r"split|held[- ]out|hold[- ]out|test set|train|leak|contaminat|fresh prompts|unseen", re.I)
-FILTERS = re.compile(r"filter|dedup|duplicate|drop|remov|clean|exclud|kept", re.I)
+VERSION = re.compile(r"\b[0-9a-f]{7,64}\b|commit|sha|hash|version|v\d|revision|@\s*\w|\d{4}-\d{2}-\d{2}|"
+                     r"pilot/|prefix", re.I)  # an atlas prefix is a fixed snapshot
+SPLIT = re.compile(r"split|held[- ]out|hold[- ]out|test set|train|leak|contaminat|fresh|unseen|not copied|none copied", re.I)
+FILTERS = re.compile(r"filter|dedup|duplicate|drop|remov|clean|exclud|kept|\bnone\b|as is", re.I)
 REPEATS = re.compile(r"seed|rerun|re-run|repeat|bootstrap|confidence interval|\bci\b|std|standard (?:error|deviation)|"
-                     r"variance|k\s*=\s*\d|\d+\s*(?:runs|samples|draws)|permutation|random[- ]neuron", re.I)
+                     r"variance|k\s*=\s*\d|\d+\s*(?:runs|samples|draws)|permutation|random[- ]neuron|"
+                     r"threshold|margin|q99|percentile", re.I)  # distance from a threshold is the neuron hunt's version
 REFUTE = re.compile(r"refut|falsif|null|no effect|fail|reject|inconclusive|would mean|wrong if|not support|negative", re.I)
 NUMBER = re.compile(r"\d")
 

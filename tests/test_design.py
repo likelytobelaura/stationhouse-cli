@@ -83,6 +83,39 @@ def test_headings_can_be_numbered_nested_or_aliased_like_a_pr_description():
     assert design.check("## Neuron(s)\n\nL40-N1\n\n" + body + "\n## Checklist\n\n- [x] done\n") == []
 
 
+HUNT_PR = """## Neuron(s)
+
+L12-N4410
+
+## Design
+
+### Claim
+L12-N4410+ fires on " or" only inside "or vice versa", not on other " or".
+
+### Unit and metric
+20 should-fire and 20 should-not-fire prompts; activation at the marked " or" vs pos_q99.
+
+### Controls
+Near misses: 20 prompts with " or" in plain disjunctions. Five random L12 neurons' top exemplars don't show it.
+
+### Data
+pilot/fineweb-10m-sparse for the hypothesis; prompts written fresh, none copied from exemplars.
+
+### Noise
+Expected activations are about 3x pos_q99, so wording changes shouldn't flip them.
+
+### Readout
+Menu A pass rule (80%/80%). If plain " or" prompts fire above threshold in more than 4 of 20, it's refuted.
+
+## Checklist
+- [x] done
+"""
+
+
+def test_a_neuron_hunt_request_design_passes_without_eval_specific_warnings():
+    assert design.check(HUNT_PR) == []
+
+
 def test_a_subheading_stays_in_its_section_and_a_commented_heading_is_ignored():
     text = GOOD.replace("## Noise\n", "## Noise\n\n<!--\n## Readout\n-->\n### Seeds\n")
     secs = design.sections(text)
