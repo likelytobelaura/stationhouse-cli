@@ -6,6 +6,7 @@ import io
 import json
 import shutil
 import sys
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 
@@ -234,6 +235,83 @@ def cmd_release(args):
         print(f"Released {args.task_id}.")
         if d.get("dashboard") in CARD_REMOVED:
             print(CARD_REMOVED[d["dashboard"]])
+    _emit(args, out, human)
+
+
+# Neuron claims exist only in the Marin Neuron Atlas: one holder per neuron, 7 days from the last
+# activity (an open PR stops the clock), at most 5 each, GitHub verified on the profile.
+NEURONS = "/api/v1/projects/marin-neuron-atlas/neurons"
+HUNT_REPO = "Station-House/marin-neuron-hunt"
+
+
+def _day(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%b %-d")
+
+
+def _neuron_line(c):
+    if c.get("state") == "in-review":
+        when = f"PR #{c.get('prNum')} open"
+    elif c.get("until"):
+        when = f"until {_day(c['until'])}"
+    else:
+        when = c.get("state", "")
+    challenge = f", challenging @{c['explainedBy']}" if c.get("challenge") else ""
+    return f"{c['neuronId']}  ({when}{challenge})"
+
+
+def cmd_neuron_claim(args):
+    note = " ".join(getattr(args, "note", None) or [])
+    out = request("PUT", f"{NEURONS}/{args.neuron_id}/claim", {"note": note} if note else {})
+
+    def human(d):
+        c = d["claim"]
+        if c.get("state") == "in-review":
+            print(f"You hold {c['neuronId']}; your PR #{c.get('prNum')} for it is open, so it won't lapse.")
+            return
+        verb = "Renewed: you hold" if d.get("renewed") else "You hold"
+        print(f"{verb} {c['neuronId']} until {_day(c['until'])}.")
+        if c.get("challenge"):
+            print(f"It's explained by @{c['explainedBy']}; your PR should add your version under `alternatives:`.")
+        print(f"Open a PR for it in {HUNT_REPO} (list it under '## Neuron(s)') to stop the clock.")
+    _emit(args, out, human)
+
+
+def cmd_neuron_release(args):
+    out = request("DELETE", f"{NEURONS}/{args.neuron_id}/claim")
+    _emit(args, out, lambda d: print(f"Released {d['claim']['neuronId']}."))
+
+
+def cmd_neuron_who(args):
+    out = request("GET", f"{NEURONS}/{args.neuron_id}/claim")
+
+    def human(d):
+        c = d.get("claim")
+        if not c or c.get("state") == "free":
+            print(f"Nobody holds {args.neuron_id.upper()}. Claim it: stationhouse neuron claim {args.neuron_id}")
+            return
+        if c.get("holder"):
+            print(f"@{c['holder']['github']} holds {_neuron_line(c)}")
+            if c.get("note"):
+                print(f"  \"{c['note']}\"")
+        else:
+            print(f"{c['neuronId']} is explained by @{c.get('explainedBy')} (PR #{c.get('explainedPrNum')}). "
+                  f"Claiming it starts a challenge.")
+    _emit(args, out, human)
+
+
+def cmd_neuron_mine(args):
+    out = request("GET", f"{NEURONS}/claims", query={"mine": "1"})
+
+    def human(d):
+        me = d.get("me", {})
+        if not me.get("github"):
+            print("Connect your GitHub account on your Station House profile to claim neurons.")
+        held = [c for c in d.get("claims", []) if c.get("holder")]
+        if not held:
+            print("You don't hold any neurons.")
+            return
+        print(f"You hold {me.get('live', len(held))} of {me.get('cap', 5)}:")
+        print("\n".join(f"  {_neuron_line(c)}" for c in held))
     _emit(args, out, human)
 
 
@@ -534,6 +612,20 @@ def build_parser():
     for name, fn, help in (("approve", cmd_task_approve, "admins only: create the proposed subtask"),
                            ("reject", cmd_task_reject, "admins only: decline a proposed subtask")):
         add(name, fn, help, under=tsub).add_argument("proposal_id", metavar="proposal-id")
+
+    n = sub.add_parser("neuron", help="Marin Neuron Atlas: claim a neuron so nobody else takes it")
+    nsub = n.add_subparsers(dest="neuron_cmd", required=True)
+    for name, fn, help in (
+        ("claim", cmd_neuron_claim, "hold a neuron for 7 days (again on one you hold: renew); an explained one is a challenge"),
+        ("renew", cmd_neuron_claim, "restart the 7 days on a neuron you hold"),
+        ("release", cmd_neuron_release, "give a neuron up"),
+        ("who", cmd_neuron_who, "who holds a neuron, if anyone"),
+    ):
+        sp = add(name, fn, help, under=nsub)
+        sp.add_argument("neuron_id", metavar="neuron-id", help="e.g. L40-N25546")
+        if name == "claim":
+            sp.add_argument("note", nargs="*", help="optional: what you'll test (up to 140 characters)")
+    add("mine", cmd_neuron_mine, "the neurons you hold", under=nsub)
 
     e = project(add("explore", cmd_explore, "for agents/scripts: which tasks a question is about and who is on them (no model)"))
     e.add_argument("question", nargs="*", help="e.g. who is working on the scorer?")
