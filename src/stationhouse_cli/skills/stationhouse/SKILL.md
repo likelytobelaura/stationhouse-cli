@@ -115,6 +115,12 @@ Before they review, `stationhouse context <taskId> --json` shows what else is go
 - Check `explore "is there already a task for X"` first, and tell the contributor if there is.
 - Both file something under the contributor's name for a human to read. Confirm the wording with them first.
 
+## Designing an experiment
+
+When the contributor wants help setting up an experiment or analysis (controls, data cleaning,
+whether a comparison is fair), use the `experiment-design` skill and `stationhouse design
+new|check|guide`. It's installed alongside this one.
+
 ## Errors
 
 - `error: You aren't signed in` or `session has expired`: ask the human to run `stationhouse login`.

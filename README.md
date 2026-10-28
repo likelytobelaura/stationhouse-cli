@@ -8,6 +8,8 @@ Two ways in:
 
 - **You ask.** Type a question and the Station House assistant answers: `stationhouse` opens a chat,
   or just `stationhouse what could I work on?`.
+- **Design an experiment.** `stationhouse design` gives you a template, checks it and critiques it
+  before you run anything. See [Designing an experiment](#designing-an-experiment).
 - **Your coding agent works it.** The commands (`find-work`, `context`, `prs`, `claim`, … with
   `--json`) return plain facts, and your own agent (Claude Code, Codex, Cursor) reasons over them.
   See [Using it from a coding agent](#using-it-from-a-coding-agent).
@@ -81,15 +83,45 @@ A command typed exactly runs as that command (`stationhouse who add-question`); 
 a command is a question. A near-miss like `stationhouse claimm x` is an error ("did you mean
 `claim`?"), never a question.
 
+## Designing an experiment
+
+Before you run an experiment or analysis, write down how it's set up and check it:
+
+```bash
+stationhouse design new experiments/my-idea   # writes DESIGN.md with six stages to fill in
+stationhouse design check experiments/my-idea # every stage filled in, a baseline named, ... (exit 1 on errors)
+stationhouse design review experiments/my-idea  # the Station House assistant critiques it (signed in)
+stationhouse design guide                     # the method, stage by stage
+```
+
+The six stages are **Claim** (one falsifiable sentence), **Unit and metric**, **Controls** (at least
+one trivial baseline, and one control that differs in exactly one thing), **Data** (version, filters
+with counts, a split by the unit that can leak), **Noise** (seeds, reruns, bootstrap) and
+**Readout** (the pass rule and the result that would mean "no", written before the run). `new`
+takes a folder (it writes `DESIGN.md`) or a file name, so on ConspiracyBench it can write the
+request's `EXPERIMENT.md` directly. Projects keep their own controls and traps in their
+`CONTRIBUTING.md`; the headings are the same everywhere, so `check` works on any of them, including a
+PR description with a `## Design` section.
+
+`check` is plain text rules with no model: it catches a missing piece, not a bad idea. ConspiracyBench
+and the Marin Neuron Hunt require it to pass before an experiment request is merged; each repo
+carries the same rules as `scripts/check_design.py` (the hunt runs it in CI), so keep them in sync
+when the rules here change. For the
+thinking, use `review`, or your coding agent with the `experiment-design` skill (below): it walks you
+through the stages one at a time, asks rather than fills in, and red-teams the design before you run
+it. `review` sends the design as one assistant question (at most 4,000 characters; a longer file is
+cut to the six stages).
+
 ## Using it from a coding agent
 
 ```bash
-stationhouse skills-install   # Claude Code: copies the skill to ~/.claude/skills/stationhouse
+stationhouse skills-install   # Claude Code: copies both skills to ~/.claude/skills/ (stationhouse, experiment-design)
 stationhouse agents-md        # Codex, Cursor and others: writes the same rules into ./AGENTS.md
 ```
 
-`agents-md` adds a marked section to the project's `AGENTS.md` and leaves the rest of the file alone;
-run it again after upgrading to refresh the section (`--print` shows it without writing).
+`agents-md` adds a marked section per skill to the project's `AGENTS.md` and leaves the rest of the
+file alone; run it again after upgrading to refresh them (`--print` shows them without writing).
+Then ask your agent "help me set up this experiment" or "review my design".
 
 Then ask your agent "what should I work on?" It runs `find-work --json`, reads the summaries and
 reasons, and suggests a task. It claims only after you agree. The skill keeps your agent on the

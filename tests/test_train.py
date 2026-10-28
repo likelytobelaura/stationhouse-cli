@@ -35,7 +35,7 @@ def test_the_first_run_in_a_terminal_plays_it_once(monkeypatch, capsys):
     code, out, _ = run(capsys, "agents-md", "--print")
     assert code == 0 and "STATION" in out and "Welcome to Station House." in out
     assert "\033[?25h" in out  # the cursor is given back
-    assert out.rstrip().endswith("<!-- stationhouse:end -->")  # and the command still ran
+    assert out.rstrip().endswith("<!-- stationhouse-design:end -->")  # and the command still ran
     assert load_settings()["welcomed"] is True
     _, again, _ = run(capsys, "agents-md", "--print")
     assert "STATION" not in again and "Welcome" not in again
