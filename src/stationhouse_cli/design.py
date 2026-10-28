@@ -37,12 +37,12 @@ NUMBER = re.compile(r"\d")
 
 
 def template() -> str:
-    return (resources.files("stationhouse_cli") / "skills" / "experiment-design" / "TEMPLATE.md").read_text()
+    return (resources.files("stationhouse_cli") / "skills" / "experiment-design" / "TEMPLATE.md").read_text(encoding="utf-8")
 
 
 def guide() -> str:
     """The skill's body, frontmatter dropped: the same guidance a coding agent gets."""
-    text = (resources.files("stationhouse_cli") / "skills" / "experiment-design" / "SKILL.md").read_text()
+    text = (resources.files("stationhouse_cli") / "skills" / "experiment-design" / "SKILL.md").read_text(encoding="utf-8")
     return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
 
 

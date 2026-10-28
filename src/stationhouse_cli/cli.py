@@ -513,7 +513,7 @@ def cmd_design_new(args):
     if path.exists() and not args.force:
         raise ApiError(f"{path} already exists. Work in it, or pass --force to start it over.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(design.template())
+    path.write_text(design.template(), encoding="utf-8")
     _emit(args, {"path": str(path)}, lambda d: print(
         f"Wrote {path}. Fill in each section before you run anything, then: stationhouse design check {path}"))
 
@@ -522,7 +522,7 @@ def _read_design(path: str) -> tuple[Path, str]:
     p = _design_file(path)
     if not p.is_file():
         raise ApiError(f"{p} doesn't exist. Start one with: stationhouse design new {path}")
-    return p, p.read_text()
+    return p, p.read_text(encoding="utf-8")
 
 
 def _print_findings(path, findings):
@@ -606,7 +606,7 @@ MARKERS = {
 
 def agents_section(skill: str = "stationhouse") -> str:
     """The usage rules for any coding agent, from the same source as the Claude Code skill (frontmatter dropped)."""
-    text = (resources.files("stationhouse_cli") / "skills" / skill / "SKILL.md").read_text()
+    text = (resources.files("stationhouse_cli") / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     body = text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
     begin, end = MARKERS[skill]
     return f"{begin}\n{body}\n{end}\n"
@@ -627,12 +627,12 @@ def cmd_agents_md(args):
         print("\n".join(agents_section(name) for name in SKILLS), end="")
         return
     path = Path(args.dir).expanduser() / "AGENTS.md"
-    existing = path.read_text() if path.exists() else ""
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
     text = existing
     for name in SKILLS:
         text = with_section(text, agents_section(name), *MARKERS[name])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     print(f"{'Updated' if existing else 'Wrote'} the stationhouse sections of {path}")
 
 
