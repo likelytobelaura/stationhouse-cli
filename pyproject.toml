@@ -9,6 +9,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+mcp = ["mcp>=2.3,<3"]  # `stationhouse mcp`: the Experimentation Wizard for coding agents
 
 [build-system]
 requires = ["setuptools>=61"]

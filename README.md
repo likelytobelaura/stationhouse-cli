@@ -112,6 +112,59 @@ through the stages one at a time, asks rather than fills in, and red-teams the d
 it. `review` sends the design as one assistant question (at most 4,000 characters; a longer file is
 cut to the six stages).
 
+## The Experimentation Wizard (before an experiment PR)
+
+Before you push a PR that is an experiment to a Station House project (a request, an
+`EXPERIMENT.md` write-up, result files), your design goes through three rounds of reviewer
+questions, and **you** answer them:
+
+1. **The claim and the controls**
+2. **The data and the noise**
+3. **The metric and the readout**
+
+Between rounds you revise the design with your agent. After round 3, finalizing gives you a
+`Design-Session: ds_…` line for the PR description.
+
+**In Claude Code**, install the plugin, then sign in once:
+
+```
+/plugin marketplace add likelytobelaura/stationhouse-cli
+/plugin install stationhouse@stationhouse-cli
+```
+
+Then run `stationhouse login` in a terminal. The plugin contains:
+- **the MCP server** (needs [uv](https://docs.astral.sh/uv/)): each round's questions appear as a form
+  inside Claude Code, and your answers go straight to Station House, never through the model.
+- **a push gate**: Claude can't `git push`, `gh pr create` or `hf upload --create-pr` an experiment
+  whose design hasn't been reviewed.
+- **the skills**, and `/design-review` to start a review by hand.
+
+**Other agents (Codex, Cursor, ...):**
+
+```bash
+pip install 'stationhouse-cli[mcp] @ git+https://github.com/likelytobelaura/stationhouse-cli'
+# register `stationhouse mcp` as a stdio MCP server in your agent's config
+stationhouse hooks install       # the same push gate, as this repo's git pre-push hook
+stationhouse agents-md           # the rules, in AGENTS.md
+```
+
+**Without MCP**, you can run it from the CLI:
+
+```bash
+stationhouse design start "Does pressure raise endorsement?"
+stationhouse design round experiment_requests/x/EXPERIMENT.md   # prints round 1's questions and a link
+stationhouse design answer                                      # answer them, in a terminal (or at the link)
+stationhouse design finalize experiment_requests/x/EXPERIMENT.md
+stationhouse design gate                                        # what the push gate will say (exit 2 = blocked)
+```
+
+**Optional:** `stationhouse design attach-trace` shares this session's agent transcript so we can study
+how experiments get designed. It shows you a redacted preview and asks first. Keys, tokens, emails
+and file contents are removed, and only Station House admins can read it.
+
+The gate only adds friction (`--no-verify` skips the git hook). Experiment PRs that arrive without a
+finished review are noted on the PR and on the platform.
+
 ## Using it from a coding agent
 
 ```bash

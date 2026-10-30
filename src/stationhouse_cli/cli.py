@@ -10,7 +10,7 @@ from datetime import datetime
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, chat, design, explore as explore_mod, inbox, projects, train, work
+from . import __version__, chat, design, explore as explore_mod, gate, inbox, projects, traces, train, wizard, work
 from .auth import AuthError, current_credentials, login, normalize_email
 from .client import ApiError, request
 from .store import clear_credentials, load_credentials
@@ -578,6 +578,203 @@ def cmd_design_review(args):
     _emit(args, {"path": str(path), "findings": findings, "truncated": truncated, "review": reply}, human)
 
 
+def _here():
+    """(repo id, project id, branch) for the current directory's Station House project repo."""
+    root = wizard.repo_root(".") or Path(".").resolve()
+    project = wizard.project_repo(wizard.remote_repos(root))
+    if not project:
+        raise ApiError("This folder isn't a clone of a Station House project repo. Pass --repo hf:owner/name or github:owner/name.")
+    return project["repo"], project.get("projectId"), wizard.current_branch(root)
+
+
+def _repo_args(args):
+    if getattr(args, "repo", None):
+        project = wizard.project_repo([args.repo]) or {"repo": args.repo, "projectId": None}
+        return project["repo"], project.get("projectId"), wizard.current_branch(".")
+    return _here()
+
+
+def _session_id(args) -> str:
+    if getattr(args, "session", None):
+        return args.session
+    repo, _, branch = _repo_args(args)
+    session = wizard.find(repo, branch)
+    if not session:
+        raise ApiError("No design review for this branch yet. Start one: stationhouse design start \"<title>\"")
+    return session["id"]
+
+
+def cmd_design_start(args):
+    repo, project_id, branch = _repo_args(args)
+    session = wizard.start(repo, branch, " ".join(args.title), project_id)
+    _emit(args, {"session": session}, lambda d: print(
+        f"Started design review {session['id']} for {repo}{' (' + branch + ')' if branch else ''}.\n"
+        f"Next: stationhouse design round <design file>"))
+
+
+def cmd_design_round(args):
+    path, text = _read_design(args.path)
+    sid = _session_id(args)
+    root = wizard.repo_root(".")
+    files = gate.changed_files(root) if root else []
+    res = wizard.ask_round(sid, text, wizard.results_summary(files, root) if root else "", wizard.format_check(text),
+                           getattr(args, "no_change_reason", None))
+    round_, session = res["round"], res["session"]
+
+    def human(_d):
+        print(wizard.describe_round(round_))
+        print(f"\nAnswer these yourself at {session['answerUrl']}\nor in a separate terminal: stationhouse design answer")
+        print("\n(Coding agents: STOP here. Show the contributor these questions word for word; don't answer them.)")
+    _emit(args, {"session": session, "round": round_}, human)
+    return 3  # waiting for a human
+
+
+def cmd_design_answer(args):
+    import sys
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ApiError("`design answer` takes the contributor's own answers, typed in a terminal. Run it in a separate "
+                       "terminal window, or answer at the link from `design round`.")
+    sid = _session_id(args)
+    full = wizard.get(sid)
+    waiting = next((r for r in reversed(full["rounds"]) if not r.get("answers")), None)
+    if not waiting:
+        print("No round is waiting for answers. Submit the next round with: stationhouse design round <file>")
+        return 0
+    print(wizard.describe_round(waiting))
+    print(f"\nType each answer; finish it with an empty line. At least {wizard.MIN_ANSWER} characters, or \"n/a: <why>\".")
+    answers = {}
+    questions = waiting["feedback"]["questions"]
+    pending = questions
+    while True:
+        while pending:
+            for q in pending:
+                print(f"\n[{q['id']}] {q['question']}")
+                lines = []
+                while True:
+                    line = input("> ")
+                    if not line.strip():
+                        break
+                    lines.append(line)
+                answers[q["id"]] = "\n".join(lines)
+            problems = wizard.answer_problems(questions, answers)
+            for qid, problem in problems.items():
+                print(f"{qid}: {problem}")
+            pending = [q for q in questions if q["id"] in problems]
+        try:
+            res = wizard.answer(sid, waiting["n"], answers, "cli-tty")
+            break
+        except ApiError as e:
+            if e.status != 400 or not e.body.get("problems"):
+                raise
+            # Graded vague or evasive: say what's missing and ask those again.
+            print(f"\n{e}")
+            problems = {p["id"]: p["problem"] for p in e.body["problems"]}
+            for qid, problem in problems.items():
+                print(f"{qid}: {problem}")
+            pending = [q for q in questions if q["id"] in problems]
+    done = res["session"]["roundsAnswered"] >= wizard.ROUNDS
+    print(f"\nSaved round {waiting['n']}. " + ("All three rounds are answered: finalize with stationhouse design finalize <file>."
+                                              if done else "Revise the design, then: stationhouse design round <file>"))
+    return 0
+
+
+def cmd_design_status(args):
+    sid = _session_id(args)
+    full = wizard.get(sid)
+    s = full["session"]
+
+    def human(_d):
+        print(f"{s['id']}  {s['title']}  ({s['repo']})")
+        print(f"{s['roundsAnswered']}/{wizard.ROUNDS} rounds answered" + ("; finalized" if s.get("finalSha256") else ""))
+        for r in full["rounds"]:
+            print(f"  round {r['n']}: {r['focus']}: " + (f"answered via {r['answeredVia']}" if r.get("answers") else "waiting"))
+        print(f"Web: {s['answerUrl']}")
+    _emit(args, full, human)
+
+
+def cmd_design_finalize(args):
+    path, text = _read_design(args.path)
+    res = wizard.finalize(_session_id(args), text)
+
+    def human(d):
+        v = d.get("verdict")
+        if v:
+            print("Closing review:\n" + v.get("summary", ""))
+            for s in v.get("stages", []):
+                print(f"  {s['stage']}: {s['status']}" + (f"  (\u201c{s['quote']}\u201d)" if s.get("quote") else ""))
+            for b in v.get("blockers", []):
+                print(f"  {'resolved' if b['resolved'] else 'OPEN'} blocker: {b['issue']}")
+            p = v.get("preregistration", {})
+            for k in ("claim", "unit", "metric", "pass", "refute", "prediction"):
+                print(f"  {k}: {p.get(k) or 'not stated'}")
+            print()
+        print(f"Finalized. Put this line in the PR description:\n{d['marker']}")
+    _emit(args, res, human)
+
+
+def cmd_design_gate(args):
+    import sys
+    if args.hook:
+        code, message = gate.hook(sys.stdin.read())
+        if message:
+            print(message, file=sys.stderr)
+        return code
+    if args.pre_push is not None:
+        return gate.main_pre_push(args.pre_push or None)
+    body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else ""
+    result = gate.check(".", repo=args.repo, base=args.base, body=body)
+    _emit(args, result, lambda d: print(d.get("message", "")))
+    return gate.BLOCK if result["outcome"] == "blocked" else 0
+
+
+def cmd_design_attach_trace(args):
+    import sys
+    sid = _session_id(args)
+    prepared = traces.prepare(sid, Path(".").resolve(), args.file)
+    c = prepared["counts"]
+    print(f"Transcript: {prepared['path']} ({prepared['agent']})")
+    print(f"After redaction: {c.get('lines', 0)} entries; {c.get('secrets', 0)} keys/tokens/emails removed; "
+          f"{c.get('droppedFields', 0)} file-content fields dropped; {c.get('toolResultsTrimmed', 0)} tool outputs trimmed.")
+    print("\nStart of what would be sent:\n" + (traces.preview(prepared["text"]) or "(no messages)"))
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ApiError("Attaching a transcript needs your yes in a terminal. Run this in a terminal window.")
+    if input("\nSend it to Station House (admins only can read it)? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Not sent.")
+        return 0
+    res = traces.upload(sid, prepared, "cli-tty")
+    print(f"Attached ({res['bytes']} bytes gzipped).")
+    return 0
+
+
+def cmd_hooks_install(args):
+    import os
+    import stat
+    root = wizard.repo_root(args.dir)
+    if not root:
+        raise ApiError(f"{args.dir} isn't inside a git repo.")
+    hooks_dir = Path(wizard.git(root, "rev-parse", "--git-path", "hooks") or ".git/hooks")
+    hooks_dir = hooks_dir if hooks_dir.is_absolute() else root / hooks_dir
+    target = hooks_dir / "pre-push"
+    if target.exists() and "stationhouse design gate" not in target.read_text(errors="replace") and not args.force:
+        raise ApiError(f"{target} already exists and isn't ours. Merge it by hand, or pass --force to replace it.")
+    exe = shutil.which("stationhouse")
+    command = f'"{exe}"' if exe else f'"{sys.executable}" -m stationhouse_cli.cli'
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    target.write_text(gate.PRE_PUSH_HOOK.format(command=command))
+    os.chmod(target, target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    _emit(args, {"path": str(target)}, lambda d: print(
+        f"Installed the design gate as {target}. Experiment pushes to Station House projects now need a reviewed design."))
+
+
+def cmd_mcp(args):
+    from . import mcp_server
+    try:
+        import mcp  # noqa: F401
+    except ImportError:
+        raise ApiError("The MCP server needs the `mcp` package: pip install 'stationhouse-cli[mcp]'") from None
+    return mcp_server.main()
+
+
 SKILLS = ("stationhouse", "experiment-design")
 
 
@@ -730,6 +927,37 @@ def build_parser():
     project(add("review", cmd_design_review, "ask the Station House assistant to critique a design (signed in)",
                 under=dsub)).add_argument("path", nargs="?", default=".", help="the design file, or its folder")
 
+    def wiz(name, fn, help, path=False):
+        sp = add(name, fn, help, under=dsub)
+        sp.add_argument("--session", help="design session id (default: this repo and branch's)")
+        sp.add_argument("--repo", help="hf:owner/name or github:owner/name (default: from the git remote)")
+        if path:
+            sp.add_argument("path", nargs="?", default=".", help="the design file, or its folder")
+        return sp
+
+    st = wiz("start", cmd_design_start, "Experimentation Wizard: start the three-round design review before an experiment PR")
+    st.add_argument("title", nargs="+")
+    wiz("round", cmd_design_round, "submit the design for the next review round (the contributor answers it)",
+        path=True).add_argument("--no-change-reason", help="why the design stays as it was after the last round's answers")
+    wiz("answer", cmd_design_answer, "answer the waiting round yourself, in a terminal")
+    wiz("status", cmd_design_status, "the review's rounds and answers")
+    wiz("finalize", cmd_design_finalize, "after round 3: record the design and get the Design-Session line for the PR", path=True)
+    at = wiz("attach-trace", cmd_design_attach_trace, "optional: share this session's agent transcript (redacted; asks first)")
+    at.add_argument("--file", help="the transcript (default: the newest Claude Code/Codex log that mentions the session)")
+    g = add("gate", cmd_design_gate, "is this push an experiment, and was its design reviewed? (exit 2 = blocked)", under=dsub)
+    g.add_argument("--repo", help="hf:owner/name or github:owner/name (default: from the git remote)")
+    g.add_argument("--base", help="compare against this ref (default: origin's default branch)")
+    g.add_argument("--body-file", help="the PR description, if the design is in its ## Design section")
+    g.add_argument("--hook", action="store_true", help="run as a Claude Code PreToolUse hook (tool call on stdin)")
+    g.add_argument("--pre-push", nargs="?", const="", default=None, metavar="REMOTE_URL", help="run as a git pre-push hook")
+
+    hk = sub.add_parser("hooks", help="git hooks for Station House project repos")
+    hsub = hk.add_subparsers(dest="hooks_cmd", required=True)
+    hi = add("install", cmd_hooks_install, "add the design gate as this repo's git pre-push hook", under=hsub)
+    hi.add_argument("--dir", default=".", help="the repo (default: here)")
+    hi.add_argument("--force", action="store_true", help="replace an existing pre-push hook")
+    add("mcp", cmd_mcp, "run the Experimentation Wizard MCP server (stdio) for coding agents")
+
     e = project(add("explore", cmd_explore, "for agents/scripts: which tasks a question is about and who is on them (no model)"))
     e.add_argument("question", nargs="*", help="e.g. who is working on the scorer?")
     # explore no longer uses a local model at all; the flag is still accepted so old scripts don't break.
@@ -794,7 +1022,8 @@ def main(argv=None, questions=True):
         if hasattr(args, attr) and not re.match(TASK_ID, getattr(args, attr)):
             print(f"error: {getattr(args, attr)!r} isn't a valid task id", file=sys.stderr)
             return 2
-    if args.fn is not cmd_train:
+    # The train never plays for hooks and the MCP server: their stdout/stderr belong to the agent.
+    if args.fn not in (cmd_train, cmd_mcp, cmd_design_gate):
         train.welcome(bool(getattr(args, "json", False)))
     try:
         code = args.fn(args)

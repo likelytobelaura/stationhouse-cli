@@ -1,0 +1,11 @@
+{
+  "name": "stationhouse",
+  "version": "0.2.0",
+  "description": "Station House for Claude Code: the Experimentation Wizard (three rounds of design review the contributor answers in a form, required before an experiment push), the push gate, and the Station House skills.",
+  "author": { "name": "Station House" },
+  "homepage": "https://app.station-house.net/wizard",
+  "repository": "https://github.com/likelytobelaura/stationhouse-cli",
+  "skills": ["./src/stationhouse_cli/skills/"],
+  "hooks": "./plugin/hooks.json",
+  "mcpServers": "./plugin/mcp.json"
+}

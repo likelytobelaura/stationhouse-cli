@@ -1,6 +1,6 @@
 ---
 name: experiment-design
-description: Help a Station House contributor design an experiment or analysis before they run it - the claim, metric, controls and baselines, data cleaning and splits, noise floor, and a pre-registered readout - written into a DESIGN.md (or a ConspiracyBench EXPERIMENT.md) and checked with `stationhouse design check`. Use when someone asks "how should I set up this experiment", "what's a good control", "how do I clean this data", "is this a fair comparison", "review my experiment design", or is about to open an experiment-request PR on ConspiracyBench or the Marin Neuron Hunt.
+description: Help a Station House contributor design an experiment or analysis before they run it - the claim, metric, controls and baselines, data cleaning and splits, noise floor, and a pre-registered readout - written into a DESIGN.md (or a ConspiracyBench EXPERIMENT.md) and checked with `stationhouse design check`. Use when someone asks "how should I set up this experiment", "what's a good control", "how do I clean this data", "is this a fair comparison", "review my experiment design", or is about to push or open an experiment PR on ConspiracyBench, the Marin Neuron Hunt or Consciousness Self-Attribution (which first needs the three-round Experimentation Wizard review).
 ---
 
 # Designing a Station House experiment
@@ -33,6 +33,28 @@ metric artifact, arms that differed in more than one thing, an effect smaller th
    - Does Readout say which result would mean "no"?
 6. **Run a pilot first** (a few items, one seed) to catch broken plumbing, and say in the file that
    pilot numbers don't count toward the result.
+7. **Before any push or PR: the Experimentation Wizard.** Every experiment PR on a Station House
+   project (requests, EXPERIMENT.md write-ups, result files) needs its design reviewed in three rounds
+   first: the claim and controls, then the data and noise, then the metric and readout. With the
+   `stationhouse` MCP tools: `design_start`, then `design_submit_round` with the design file. The
+   contributor answers that round's questions in a form; you get their answers back. Revise the file
+   **with them** using what they said, and submit the next round. After round 3, `design_finalize`
+   gives you a `Design-Session: ds_…` line for the PR description. Without MCP:
+   `stationhouse design start "<title>"`, `stationhouse design round <file>`, then **stop**: show the
+   questions word for word, and wait until the contributor says they've answered (at the link it
+   prints, or with `stationhouse design answer` in a separate terminal).
+   - **Never answer the review questions yourself**, don't draft answers for them to paste, and don't
+     run `design answer` for them. The point is that the contributor thinks it through.
+   - **Between rounds, write their decisions into the design in their words.** Don't add content of
+     your own; if an answer commits to a number, an arm or a threshold, that's what goes in the file.
+     If nothing should change, ask them why and pass that as `no_change_reason`.
+   - Round 1 asks for a predicted result (a value and an 80% interval): the prediction has to come
+     from the contributor.
+   - After `design_finalize`, show them the closing review word for word (each stage, open
+     blockers, the preregistration) and fix anything they want to before pushing.
+   - If a push is blocked by the design gate, that's this step: run the wizard; don't work around it.
+   - If the design changes after finalizing, finalize again (a small edit) or run a new review (a
+     change to the experiment).
 
 Never run the full experiment, open a PR, post a comment or claim a task without the contributor's
 go-ahead. Don't edit Claim, Controls or Readout after results exist: record changes under
