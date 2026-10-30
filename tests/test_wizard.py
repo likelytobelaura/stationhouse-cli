@@ -9,6 +9,8 @@ from stationhouse_cli import cli, gate, traces, wizard
 FIXTURES = json.loads((Path(__file__).parent / "design_hash_fixtures.json").read_text(encoding="utf-8"))
 SID = "ds_" + "A" * 22
 DESIGN = "# Claim\nPressure raises endorsement.\n\n## Controls\nBase model.\n"
+REPOS = [{"repo": "hf:Station-house/ConspiracyBench", "projectId": "conspiracybench"},
+         {"repo": "github:Station-House/marin-neuron-hunt", "projectId": "marin-neuron-atlas"}]
 
 
 def git(cwd, *args):
@@ -44,7 +46,7 @@ def session(**over):
 
 @pytest.fixture
 def hunt_api(api, signed_in):
-    api.routes[("GET", "/api/v1/design/repos")] = (200, {"repos": wizard.KNOWN_REPOS})
+    api.routes[("GET", "/api/v1/design/repos")] = (200, {"repos": REPOS})
     api.routes[("POST", "/api/v1/design/gate-events")] = (201, {"ok": True})
     return api
 
@@ -143,6 +145,21 @@ def test_gate_ignores_repos_that_are_not_projects(tmp_path, hunt_api):
     git(tmp_path, "init", "-q")
     git(tmp_path, "remote", "add", "origin", "https://github.com/someone/else.git")
     assert gate.check(tmp_path)["outcome"] == "not-project"
+
+
+def test_repo_list_comes_from_the_platform_and_survives_an_outage(signed_in, api, monkeypatch):
+    api.routes[("GET", "/api/v1/design/repos")] = (200, {"repos": REPOS})
+    assert wizard.project_repo(["github:station-house/MARIN-neuron-hunt"])["projectId"] == "marin-neuron-atlas"
+    # A day later the platform is down: the last list still counts.
+    monkeypatch.setattr(wizard, "REPOS_CACHE_SECONDS", -1)
+    api.routes[("GET", "/api/v1/design/repos")] = (503, {"error": "down"})
+    assert wizard.project_repo(["hf:Station-house/ConspiracyBench"])["repo"] == "hf:Station-house/ConspiracyBench"
+
+
+def test_no_repo_list_at_all_means_no_gate(repo, signed_in, api):
+    api.routes[("GET", "/api/v1/design/repos")] = (503, {"error": "down"})
+    assert wizard.known_repos() == []
+    assert gate.check(repo)["outcome"] == "not-project"
 
 
 def test_gate_fails_open_when_the_platform_is_down(repo, hunt_api):

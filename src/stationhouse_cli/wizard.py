@@ -40,13 +40,7 @@ def marker_in(text: str) -> str | None:
 
 # --- which repo ---------------------------------------------------------------------------------
 
-# Used when the platform can't be reached; GET /api/v1/design/repos is the live list.
-KNOWN_REPOS = [
-    {"repo": "hf:Station-house/ConspiracyBench", "projectId": "conspiracybench"},
-    {"repo": "github:Station-House/marin-neuron-hunt", "projectId": "marin-neuron-atlas"},
-    {"repo": "hf:Station-house/Consciousness-Self-Attribution", "projectId": "llm-self-attribution"},
-    {"repo": "github:Station-House/LLMConsciousnessSelfAttributionRepo", "projectId": "llm-self-attribution"},
-]
+# The platform's GET /api/v1/design/repos is the only list of covered repos; it's cached for a day.
 REPOS_CACHE_SECONDS = 24 * 3600
 
 _REMOTES = [
@@ -95,18 +89,24 @@ def remote_repos(cwd) -> list[str]:
 
 
 def known_repos() -> list[dict]:
-    """The repos the wizard covers, from the platform (cached for a day), else the built-in list."""
+    """The repos the wizard covers, from the platform (cached for a day). When the platform can't be
+    reached, the last list it gave; with none, no repos, so the gate lets the push through and the
+    watcher notes it."""
     cache = config_dir() / "design-repos.json"
     try:
         cached = json.loads(cache.read_text())
-        if time.time() - cached["at"] < REPOS_CACHE_SECONDS:
-            return cached["repos"]
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
+        if not isinstance(cached.get("repos"), list):
+            cached = None
+    except (OSError, ValueError, AttributeError):
+        cached = None
+    if cached and time.time() - cached.get("at", 0) < REPOS_CACHE_SECONDS:
+        return cached["repos"]
     try:
-        repos = (request("GET", "/api/v1/design/repos") or {}).get("repos") or KNOWN_REPOS
-    except Exception:  # noqa: BLE001 - offline or signed out: the built-in list is good enough
-        return KNOWN_REPOS
+        repos = (request("GET", "/api/v1/design/repos") or {}).get("repos")
+        if not isinstance(repos, list):
+            raise ApiError("the platform sent no repo list")
+    except Exception:  # noqa: BLE001 - offline or signed out: fall back to the last list, if any
+        return cached["repos"] if cached else []
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps({"at": time.time(), "repos": repos}))
