@@ -82,8 +82,10 @@ def build_server():
 
     @server.tool(description="Submit the design file for the next review round. The contributor gets 3-5 questions "
                              "in a form and answers them; you get their answers back. Revise the design with them "
-                             "before the next round. Three rounds, then design_finalize.")
-    async def design_submit_round(draft_path: str, ctx: Context, cwd: str | None = None, session_id: str | None = None) -> dict:
+                             "before the next round (an unchanged design needs no_change_reason, in the contributor's "
+                             "words). Three rounds, then design_finalize.")
+    async def design_submit_round(draft_path: str, ctx: Context, cwd: str | None = None, session_id: str | None = None,
+                                  no_change_reason: str | None = None) -> dict:
         text = _read(draft_path, cwd)
         if not session_id:
             _, repo, branch = _session_for(cwd)
@@ -96,7 +98,15 @@ def build_server():
         if root:
             from . import gate
             files = gate.changed_files(root)
-        res = wizard.ask_round(session_id, text, wizard.results_summary(files, root) if root else "", wizard.format_check(text))
+        try:
+            res = wizard.ask_round(session_id, text, wizard.results_summary(files, root) if root else "",
+                                   wizard.format_check(text), no_change_reason)
+        except ApiError as e:
+            if e.body.get("code") == "unchanged":
+                return {"status": "unchanged", "instructions": str(e) + " Ask the contributor what they want to change "
+                        "given their answers; only if they say it should stay as it is, call again with no_change_reason "
+                        "set to their reason, in their words."}
+            raise
         round_, session = res["round"], res["session"]
         no_form = {"round": round_, "answerUrl": session["answerUrl"], "instructions": STOP,
                    "questions": wizard.describe_round(round_)}
@@ -118,7 +128,15 @@ def build_server():
             answers = result.data.model_dump()
             problems = wizard.answer_problems(round_["feedback"]["questions"], answers)
             if not problems:
-                saved = wizard.answer(session_id, round_["n"], answers, "mcp-elicit")
+                try:
+                    saved = wizard.answer(session_id, round_["n"], answers, "mcp-elicit")
+                except ApiError as e:
+                    if e.status != 400 or not e.body.get("problems"):
+                        raise
+                    # The answer check found answers that don't commit to anything: ask again, saying what's missing.
+                    problems = {p["id"]: p["problem"] for p in e.body["problems"]}
+                    message = _form_message(round_) + "\n\n" + str(e) + " " + "; ".join(f"{k}: {v}" for k, v in problems.items())
+                    continue
                 done = saved["session"]["roundsAnswered"] >= wizard.ROUNDS
                 return {
                     "round": round_["n"],
@@ -133,7 +151,7 @@ def build_server():
                 }
             message = _form_message(round_) + "\n\nPlease expand: " + "; ".join(f"{k}: {v}" for k, v in problems.items())
         return {"round": round_["n"], "status": "incomplete", "answerUrl": session["answerUrl"],
-                "instructions": "The answers were too short three times. End your turn; the contributor can answer at the link."}
+                "instructions": "The answers didn't pass three times. End your turn; the contributor can answer at the link."}
 
     @server.tool(description="The current design review: rounds asked and answered, and the contributor's answers.")
     def design_status(cwd: str | None = None, session_id: str | None = None) -> dict:
@@ -146,8 +164,9 @@ def build_server():
         full = wizard.get(session_id)
         return {"session": full["session"], "rounds": full["rounds"]}
 
-    @server.tool(description="After all three rounds are answered: record the design as it will be pushed and get "
-                             "the Design-Session line for the PR description. Call again after any later edit.")
+    @server.tool(description="After all three rounds are answered: record the design as it will be pushed, get the "
+                             "closing review (show it to the contributor) and the Design-Session line for the PR "
+                             "description. Call again after a small edit; a changed experiment needs a new review.")
     async def design_finalize(draft_path: str, ctx: Context, cwd: str | None = None, session_id: str | None = None) -> dict:
         text = _read(draft_path, cwd)
         if not session_id:
@@ -156,24 +175,41 @@ def build_server():
             if not session:
                 raise ApiError("No design review for this branch. Call design_start first.")
             session_id = session["id"]
-        res = wizard.finalize(session_id, text)
-        out = {"marker": res["marker"], "session": res["session"],
-               "next": f"Put this line in the PR description: {res['marker']}"}
+        try:
+            res = wizard.finalize(session_id, text)
+        except ApiError as e:
+            if e.body.get("code") == "changedTooMuch":
+                return {"status": "changedTooMuch", "instructions": str(e) + " Tell the contributor; call design_start "
+                        "for the changed experiment and run its three rounds."}
+            raise
+        out = {"marker": res["marker"], "session": res["session"], "closingReview": res.get("verdict"),
+               "next": ("Show the contributor the closing review word for word (each stage, any open blockers, the "
+                        "preregistration) and fix anything they want to before pushing. Then put this line in the PR "
+                        f"description: {res['marker']}")}
         caps = ctx.client_capabilities
         if caps and caps.elicitation:
             from pydantic import Field, create_model
+
+            from . import traces
+            try:
+                prepared = traces.prepare(session_id, cwd or os.getcwd())
+            except (OSError, ValueError):
+                return out
+            c = prepared["counts"]
+            preview = traces.preview(prepared["text"], lines=4)
             consent = create_model("TraceConsent", attach=(bool, Field(
-                default=False, title="Share this session's agent transcript with Station House?",
-                description="Optional. Helps us study how experiments get designed. Keys, tokens, emails and file "
-                            "contents are removed first, and only Station House admins can read it.")))
+                default=False, title="Share this design conversation with Station House?",
+                description=(f"Optional, for research on how experiments get designed. It would send {c.get('lines', 0)} "
+                             f"entries from {prepared['agent']} (only the design part; {c.get('secrets', 0)} keys/emails "
+                             f"removed, all tool output and file contents dropped). Only Station House admins can read it. "
+                             f"It starts: {preview[:400]}"))))
             try:
                 result = await ctx.elicit("One optional question about research on the design process.", consent)
             except NoBackChannelError:
                 return out
             if result.action == "accept" and result.data is not None and result.data.attach:
-                from . import traces
                 try:
-                    out["trace"] = traces.attach(session_id, cwd=cwd or os.getcwd(), consent="elicitation")
+                    out["trace"] = traces.upload(session_id, prepared, "elicitation")
                 except (ApiError, OSError) as e:
                     out["trace"] = {"error": str(e)}
         return out

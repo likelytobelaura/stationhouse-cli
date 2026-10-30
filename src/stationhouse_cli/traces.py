@@ -1,7 +1,8 @@
 """Opt-in agent transcripts for a design session (`stationhouse design attach-trace`, or the consent
 question after design_finalize). Finds the coding agent's session log that mentions the design
-session, cuts it down to the conversation (no file contents, tool output trimmed), removes anything
-that looks like a key, token or email, and uploads it gzipped. Only Station House admins can read it.
+session, keeps only the stretch from `design_start` to the last mention of the session, cuts it down
+to the conversation (no file contents, no tool output), removes anything that looks like a key, token
+or email, and uploads it gzipped. Only Station House admins can read it.
 The platform's design-traces.ts runs the same secret patterns again on arrival.
 """
 import base64
@@ -15,13 +16,15 @@ from .client import request
 CONSENT_VERSION = "trace-consent-v1"
 TEXT_LIMIT = 20_000
 TOOL_INPUT_LIMIT = 2_000
-TOOL_RESULT_LIMIT = 500
+TOOL_RESULT = "[tool output removed]"
 # Claude Code keeps whole file contents and command output here; the conversation doesn't need them.
 DROP_KEYS = {"toolUseResult", "snapshot", "file", "originalFile", "structuredPatch"}
 
 SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}"),
+    re.compile(r"\bre_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bhf_[A-Za-z0-9]{20,}"),
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
@@ -31,6 +34,10 @@ SECRET_PATTERNS = [
     re.compile(r"\b[Bb]earer\s+[A-Za-z0-9._~+/=-]{20,}"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+    # NAME_KEY=value / "api_key": "value" pairs, whatever the value looks like.
+    re.compile(r"\b[A-Za-z_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z_]*[\"']?\s*[:=]\s*[\"']?[^\s\"',}]{8,}", re.I),
+    # Long random-looking strings (keys printed with no recognisable prefix, e.g. by a keychain lookup).
+    re.compile(r"\b(?=[A-Za-z0-9_+/=-]{32,}\b)(?=\S*[A-Z])(?=\S*[a-z])(?=\S*\d)[A-Za-z0-9_+/=-]{32,}\b"),
 ]
 
 
@@ -66,8 +73,11 @@ def find_log(session_id: str, cwd) -> tuple[Path, str] | None:
 
 def _cut(value, counts: dict, in_tool_result=False):
     if isinstance(value, dict):
+        if value.get("type") in ("tool_result", "function_call_output"):
+            counts["toolResultsDropped"] = counts.get("toolResultsDropped", 0) + 1
+            return {"type": value["type"], "content": TOOL_RESULT}
         out = {}
-        tool_result = value.get("type") in ("tool_result", "function_call_output")
+        tool_result = False
         for k, v in value.items():
             if k in DROP_KEYS:
                 counts["droppedFields"] = counts.get("droppedFields", 0) + 1
@@ -82,20 +92,32 @@ def _cut(value, counts: dict, in_tool_result=False):
         return out
     if isinstance(value, list):
         return [_cut(v, counts, in_tool_result) for v in value]
-    if isinstance(value, str):
-        limit = TOOL_RESULT_LIMIT if in_tool_result else TEXT_LIMIT
-        if len(value) > limit:
-            counts["toolResultsTrimmed" if in_tool_result else "textsTrimmed"] = counts.get(
-                "toolResultsTrimmed" if in_tool_result else "textsTrimmed", 0) + 1
-            return value[:limit] + " [...]"
+    if isinstance(value, str) and len(value) > TEXT_LIMIT:
+        counts["textsTrimmed"] = counts.get("textsTrimmed", 0) + 1
+        return value[:TEXT_LIMIT] + " [...]"
     return value
 
 
-def redact(lines) -> tuple[str, dict]:
-    """The transcript cut down and scrubbed, as JSONL, with counts of what was removed."""
+def design_stretch(lines: list[str], session_id: str | None) -> list[str]:
+    """The lines from the first `design_start` (or mention of the session) to the last mention of the
+    session: the design conversation, not whatever else happened in that agent session."""
+    if not session_id:
+        return lines
+    marks = [i for i, l in enumerate(lines) if session_id in l]
+    if not marks:
+        return lines
+    starts = [i for i, l in enumerate(lines[: marks[0] + 1]) if "design_start" in l or "design start" in l]
+    return lines[(starts[-1] if starts else marks[0]): marks[-1] + 1]
+
+
+def redact(lines, session_id: str | None = None) -> tuple[str, dict]:
+    """The design stretch of the transcript, cut down and scrubbed, as JSONL, with counts of what was removed."""
     counts: dict = {}
     out = []
-    for line in lines:
+    lines = list(lines)
+    kept = design_stretch(lines, session_id)
+    counts["linesOutsideDesign"] = len(lines) - len(kept)
+    for line in kept:
         line = line.strip()
         if not line:
             continue
@@ -140,7 +162,7 @@ def prepare(session_id: str, cwd, path: str | None = None) -> dict:
         if not found:
             raise FileNotFoundError(f"No Claude Code or Codex session log here mentions {session_id}. Pass --file.")
     log, agent = found
-    text, counts = redact(log.read_text(encoding="utf-8", errors="replace").splitlines())
+    text, counts = redact(log.read_text(encoding="utf-8", errors="replace").splitlines(), session_id)
     return {"path": str(log), "agent": agent, "text": text, "counts": counts}
 
 

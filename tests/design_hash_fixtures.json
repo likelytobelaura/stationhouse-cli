@@ -23,5 +23,15 @@
   "name": "leading_trailing_blank",
   "text": "\n\n\n# Claim\nX\n\n\n",
   "sha256": "5b961ae0dd2d2bdc3c4e693bb768801ebaff9505b4b7208f15a7ee602879fe68"
+ },
+ {
+  "name": "bom",
+  "text": "﻿# Claim\nModels endorse more under pressure.\n\n## Controls\nNeutral prompt.\n",
+  "sha256": "02951cb795fb7fb9e546560e6f67230bd86da33a87747c5d22cee886a2284efb"
+ },
+ {
+  "name": "separator_chars_kept",
+  "text": "# Claim\u001c\nX\n",
+  "sha256": "5e098faa8eee5074387db4e67124212f3e91854395a6d0b20a298c4aa9768b43"
  }
 ]

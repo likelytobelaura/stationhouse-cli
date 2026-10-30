@@ -68,6 +68,37 @@ def test_short_answers_are_asked_again_before_anything_is_sent(wizard_api, desig
     assert sum(c["path"].endswith("/answers") for c in wizard_api.calls) == 1
 
 
+def test_answers_graded_vague_are_asked_again_with_what_is_missing(wizard_api, design_file):
+    path = f"/api/v1/design/sessions/{SID}/answers"
+    ok = wizard_api.routes[("POST", path)]
+    wizard_api.routes[("POST", path)] = (400, {"error": "Some answers don't commit to anything yet.", "code": "vague",
+                                               "problems": [{"id": "q2", "problem": "Say which threshold."}]})
+    messages = []
+
+    async def elicit(_ctx, params):
+        messages.append(params.message)
+        if len(messages) == 2:
+            wizard_api.routes[("POST", path)] = ok
+        return types.ElicitResult(action="accept", content={q["id"]: GOOD for q in QUESTIONS})
+
+    _, out = call("design_submit_round", {"draft_path": str(design_file), "session_id": SID}, elicit)
+    assert len(messages) == 2 and "q2: Say which threshold." in messages[1]
+    assert out["roundsAnswered"] == 1
+
+
+def test_an_unchanged_design_asks_the_agent_to_check_with_the_contributor(wizard_api, design_file):
+    wizard_api.routes[("POST", f"/api/v1/design/sessions/{SID}/rounds")] = (409, {"error": "The design hasn't changed since round 1.", "code": "unchanged"})
+    _, out = call("design_submit_round", {"draft_path": str(design_file), "session_id": SID})
+    assert out["status"] == "unchanged" and "no_change_reason" in out["instructions"]
+
+
+def test_finalize_returns_the_closing_review_for_the_contributor(wizard_api, design_file):
+    verdict = {"summary": "Solid.", "stages": [], "blockers": [], "preregistration": {}}
+    wizard_api.routes[("POST", f"/api/v1/design/sessions/{SID}/finalize")] = (200, {"marker": f"Design-Session: {SID}", "session": SESSION, "verdict": verdict})
+    _, out = call("design_finalize", {"draft_path": str(design_file), "session_id": SID})
+    assert out["closingReview"] == verdict and "closing review" in out["next"]
+
+
 def test_a_declined_form_stops_the_agent_without_answers(wizard_api, design_file):
     async def elicit(_ctx, params):
         return types.ElicitResult(action="decline")

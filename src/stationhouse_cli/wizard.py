@@ -12,6 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from .auth import AuthError
 from .client import ApiError, request
 from .config import config_dir
 
@@ -25,8 +26,9 @@ MARKER = re.compile(r"Design-Session:\s*(ds_[A-Za-z0-9]{22})\b")
 
 def normalize(text: str) -> str:
     """What the design hash covers; the platform and hf-watch use the same rule and fixtures."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return "\n".join(line.rstrip() for line in text.split("\n") if not MARKER_LINE.match(line)).strip()
+    # Only spaces, tabs and newlines are trimmed and a leading BOM dropped, matching the platform's JS exactly.
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip(" \t") for line in text.split("\n") if not MARKER_LINE.match(line)).strip(" \t\n")
 
 
 def design_hash(text: str) -> str:
@@ -132,7 +134,8 @@ RESULT_HINTS = [
     (re.compile(r"(^|/)results?/", re.I), "a results/ directory"),
     (re.compile(r"manifest[^/]*\.json$", re.I), "a run manifest"),
     (re.compile(r"(^|/)EXPERIMENT[^/]*\.(md|txt)$", re.I), "an EXPERIMENT write-up"),
-    (re.compile(r"\.(eval|csv)$", re.I), ".eval or .csv output"),
+    (re.compile(r"\.(eval|csv|jsonl|parquet)$", re.I), ".eval, .csv, .jsonl or .parquet output"),
+    (re.compile(r"(^|/)outputs?/", re.I), "an outputs/ directory"),
     (re.compile(r"(summary|metrics)[^/]*\.json$", re.I), "a summary/metrics JSON"),
 ]
 REQUESTS = [
@@ -172,8 +175,9 @@ def classify(files: list[str], title: str = "", body: str = "") -> dict:
     try:
         res = request("POST", "/api/v1/design/classify", {"files": files[:200], "title": title, "body": body}) or {}
         return {"kind": res.get("kind", "other"), "reason": res.get("reason", ""), "method": "model"}
-    except ApiError as e:
-        return {"kind": "other", "reason": f"couldn't classify it ({e}); letting it through", "method": "unavailable"}
+    except (ApiError, AuthError) as e:
+        # Undecided counts as an experiment: the review check that follows decides (and fails open itself).
+        return {"kind": "experiment", "reason": f"couldn't classify it ({e}), so treating it as one", "method": "unavailable"}
 
 
 # --- the design document ------------------------------------------------------------------------
@@ -257,7 +261,8 @@ def get(session_id: str) -> dict:
 
 
 def find(repo: str, branch: str | None) -> dict | None:
-    """This repo and branch's session: the one this machine started, else the newest on the platform."""
+    """This repo and branch's session: the one this machine started, else the newest on the platform for
+    that branch. With no branch (an upload from a plain folder), only a session started here counts."""
     sid = remembered(repo, branch)
     if sid:
         try:
@@ -265,14 +270,19 @@ def find(repo: str, branch: str | None) -> dict | None:
         except ApiError as e:
             if e.status != 404:
                 raise
-    query = {"repo": repo, **({"branch": branch} if branch else {})}
+    if not branch:
+        return None
+    query = {"repo": repo, "branch": branch}
     sessions = (request("GET", "/api/v1/design/sessions", query=query) or {}).get("sessions") or []
     return sessions[0] if sessions else None
 
 
-def ask_round(session_id: str, draft: str, results: str = "", format_check: list[str] | None = None) -> dict:
-    return request("POST", f"/api/v1/design/sessions/{session_id}/rounds",
-                   {"draft": draft, "resultsSummary": results, "formatCheck": format_check or []})
+def ask_round(session_id: str, draft: str, results: str = "", format_check: list[str] | None = None,
+              no_change_reason: str | None = None) -> dict:
+    body = {"draft": draft, "resultsSummary": results, "formatCheck": format_check or []}
+    if no_change_reason:
+        body["noChangeReason"] = no_change_reason
+    return request("POST", f"/api/v1/design/sessions/{session_id}/rounds", body)
 
 
 def answer(session_id: str, n: int, answers: dict, via: str) -> dict:

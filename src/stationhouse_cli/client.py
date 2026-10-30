@@ -6,6 +6,9 @@ import urllib.request
 from . import __version__, config
 from .auth import current_credentials
 
+# Seconds per call; the push gate lowers it so a slow platform can't stall a push.
+TIMEOUT = 60
+
 
 class ApiError(Exception):
     def __init__(self, message: str, status: int | None = None, body: dict | None = None):
@@ -27,7 +30,7 @@ def request(method: str, path: str, body: dict | None = None, query: dict | None
                  "x-station-house-id-token": creds["id_token"],
                  "Content-Type": "application/json", "User-Agent": f"stationhouse-cli/{__version__}"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return json.loads(r.read() or "null")
     except urllib.error.HTTPError as e:
         try:

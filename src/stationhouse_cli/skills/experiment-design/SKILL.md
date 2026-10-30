@@ -45,6 +45,13 @@ metric artifact, arms that differed in more than one thing, an effect smaller th
    prints, or with `stationhouse design answer` in a separate terminal).
    - **Never answer the review questions yourself**, don't draft answers for them to paste, and don't
      run `design answer` for them. The point is that the contributor thinks it through.
+   - **Between rounds, write their decisions into the design in their words.** Don't add content of
+     your own; if an answer commits to a number, an arm or a threshold, that's what goes in the file.
+     If nothing should change, ask them why and pass that as `no_change_reason`.
+   - Round 1 asks for a predicted result (a value and an 80% interval): the prediction has to come
+     from the contributor.
+   - After `design_finalize`, show them the closing review word for word (each stage, open
+     blockers, the preregistration) and fix anything they want to before pushing.
    - If a push is blocked by the design gate, that's this step: run the wizard; don't work around it.
    - If the design changes after finalizing, finalize again (a small edit) or run a new review (a
      change to the experiment).

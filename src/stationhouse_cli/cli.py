@@ -617,7 +617,8 @@ def cmd_design_round(args):
     sid = _session_id(args)
     root = wizard.repo_root(".")
     files = gate.changed_files(root) if root else []
-    res = wizard.ask_round(sid, text, wizard.results_summary(files, root) if root else "", wizard.format_check(text))
+    res = wizard.ask_round(sid, text, wizard.results_summary(files, root) if root else "", wizard.format_check(text),
+                           getattr(args, "no_change_reason", None))
     round_, session = res["round"], res["session"]
 
     def human(_d):
@@ -644,21 +645,33 @@ def cmd_design_answer(args):
     answers = {}
     questions = waiting["feedback"]["questions"]
     pending = questions
-    while pending:
-        for q in pending:
-            print(f"\n[{q['id']}] {q['question']}")
-            lines = []
-            while True:
-                line = input("> ")
-                if not line.strip():
-                    break
-                lines.append(line)
-            answers[q["id"]] = "\n".join(lines)
-        problems = wizard.answer_problems(questions, answers)
-        for qid, problem in problems.items():
-            print(f"{qid}: {problem}")
-        pending = [q for q in questions if q["id"] in problems]
-    res = wizard.answer(sid, waiting["n"], answers, "cli-tty")
+    while True:
+        while pending:
+            for q in pending:
+                print(f"\n[{q['id']}] {q['question']}")
+                lines = []
+                while True:
+                    line = input("> ")
+                    if not line.strip():
+                        break
+                    lines.append(line)
+                answers[q["id"]] = "\n".join(lines)
+            problems = wizard.answer_problems(questions, answers)
+            for qid, problem in problems.items():
+                print(f"{qid}: {problem}")
+            pending = [q for q in questions if q["id"] in problems]
+        try:
+            res = wizard.answer(sid, waiting["n"], answers, "cli-tty")
+            break
+        except ApiError as e:
+            if e.status != 400 or not e.body.get("problems"):
+                raise
+            # Graded vague or evasive: say what's missing and ask those again.
+            print(f"\n{e}")
+            problems = {p["id"]: p["problem"] for p in e.body["problems"]}
+            for qid, problem in problems.items():
+                print(f"{qid}: {problem}")
+            pending = [q for q in questions if q["id"] in problems]
     done = res["session"]["roundsAnswered"] >= wizard.ROUNDS
     print(f"\nSaved round {waiting['n']}. " + ("All three rounds are answered: finalize with stationhouse design finalize <file>."
                                               if done else "Revise the design, then: stationhouse design round <file>"))
@@ -682,7 +695,21 @@ def cmd_design_status(args):
 def cmd_design_finalize(args):
     path, text = _read_design(args.path)
     res = wizard.finalize(_session_id(args), text)
-    _emit(args, res, lambda d: print(f"Finalized. Put this line in the PR description:\n{d['marker']}"))
+
+    def human(d):
+        v = d.get("verdict")
+        if v:
+            print("Closing review:\n" + v.get("summary", ""))
+            for s in v.get("stages", []):
+                print(f"  {s['stage']}: {s['status']}" + (f"  (\u201c{s['quote']}\u201d)" if s.get("quote") else ""))
+            for b in v.get("blockers", []):
+                print(f"  {'resolved' if b['resolved'] else 'OPEN'} blocker: {b['issue']}")
+            p = v.get("preregistration", {})
+            for k in ("claim", "unit", "metric", "pass", "refute", "prediction"):
+                print(f"  {k}: {p.get(k) or 'not stated'}")
+            print()
+        print(f"Finalized. Put this line in the PR description:\n{d['marker']}")
+    _emit(args, res, human)
 
 
 def cmd_design_gate(args):
@@ -693,10 +720,7 @@ def cmd_design_gate(args):
             print(message, file=sys.stderr)
         return code
     if args.pre_push is not None:
-        code, message = gate.pre_push(args.pre_push or None)
-        if message:
-            print(message, file=sys.stderr)
-        return code
+        return gate.main_pre_push(args.pre_push or None)
     body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else ""
     result = gate.check(".", repo=args.repo, base=args.base, body=body)
     _emit(args, result, lambda d: print(d.get("message", "")))
@@ -913,7 +937,8 @@ def build_parser():
 
     st = wiz("start", cmd_design_start, "Experimentation Wizard: start the three-round design review before an experiment PR")
     st.add_argument("title", nargs="+")
-    wiz("round", cmd_design_round, "submit the design for the next review round (the contributor answers it)", path=True)
+    wiz("round", cmd_design_round, "submit the design for the next review round (the contributor answers it)",
+        path=True).add_argument("--no-change-reason", help="why the design stays as it was after the last round's answers")
     wiz("answer", cmd_design_answer, "answer the waiting round yourself, in a terminal")
     wiz("status", cmd_design_status, "the review's rounds and answers")
     wiz("finalize", cmd_design_finalize, "after round 3: record the design and get the Design-Session line for the PR", path=True)

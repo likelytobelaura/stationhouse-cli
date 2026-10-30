@@ -186,8 +186,98 @@ def test_hook_reads_an_hf_upload(tmp_path, hunt_api):
     cmd = f"hf upload Station-house/ConspiracyBench {out} completed_experiments/exp --repo-type space --create-pr"
     code, msg = gate.hook(json.dumps({"tool_input": {"command": cmd}, "cwd": str(tmp_path)}))
     assert code == 2, msg
-    q = next(c for c in hunt_api.calls if c["path"].startswith("/api/v1/design/sessions"))
-    assert "hf%3AStation-house%2FConspiracyBench" in q["path"]
+    assert "no git branch" in msg
+    # No branch: only a session started from this folder counts, never the newest one on the platform.
+    assert not any(c["path"].startswith("/api/v1/design/sessions") for c in hunt_api.calls)
+    logged = [c for c in hunt_api.calls if c["path"] == "/api/v1/design/gate-events"][-1]["body"]
+    assert logged["repo"] == "hf:Station-house/ConspiracyBench"
+
+
+def test_hf_upload_finds_the_design_in_the_local_folder(tmp_path, hunt_api):
+    out = tmp_path / "exp"
+    (out / "results").mkdir(parents=True)
+    (out / "EXPERIMENT.md").write_text(DESIGN)
+    (out / "results" / "summary.json").write_text("{}")
+    wizard.remember("hf:Station-house/ConspiracyBench", None, SID)
+    hunt_api.routes[("GET", f"/api/v1/design/sessions/{SID}")] = (200, {"session": session(repo="hf:Station-house/ConspiracyBench"), "rounds": []})
+    cmd = f"hf upload Station-house/ConspiracyBench {out} completed_experiments/exp --repo-type space"
+    code, msg = gate.hook(json.dumps({"tool_input": {"command": cmd}, "cwd": str(tmp_path)}))
+    assert code == 0 and SID in msg, msg
+
+
+@pytest.mark.parametrize("command", [
+    "git push", "/usr/bin/git push origin x", "git -c core.x=y push", "git --no-pager push", 'git -C "a b" push',
+    "hf upload Station-house/ConspiracyBench . --repo-type space", "hf upload-large-folder Station-house/ConspiracyBench .",
+    "gh pr create --fill", "gh api repos/o/r/pulls -f title=x", "python -c 'api.upload_folder(folder_path=\".\")'",
+    "cd sub && git push origin feat",
+])
+def test_push_forms_are_recognised(command):
+    assert any(any(p.search(seg) for p in gate.PUSHES) for seg, _ in gate._segments(command)), command
+
+
+@pytest.mark.parametrize("command", ["git status", "git pushd", "echo hf uploaded", "gh pr view 3"])
+def test_other_commands_are_not_pushes(command):
+    assert not any(any(p.search(seg) for p in gate.PUSHES) for seg, _ in gate._segments(command)), command
+
+
+def test_push_of_another_branch_checks_that_branch(repo, hunt_api):
+    hunt_api.routes[("GET", "/api/v1/design/sessions")] = (200, {"sessions": []})
+    git(repo, "checkout", "-q", "main")
+    code, msg = gate.hook(json.dumps({"tool_input": {"command": "git push origin req/L40"}, "cwd": str(repo)}))
+    assert code == 2, "pushing req/L40 from main still checks req/L40's request"
+    q = [c for c in hunt_api.calls if c["path"].startswith("/api/v1/design/sessions")][-1]
+    assert "branch=req%2FL40" in q["path"]
+
+
+def test_pre_push_checks_the_refs_git_sends(repo, hunt_api):
+    hunt_api.routes[("GET", "/api/v1/design/sessions")] = (200, {"sessions": []})
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "req/L40"], capture_output=True, text=True).stdout.strip()
+    git(repo, "checkout", "-q", "main")
+    code, msg = gate.pre_push("https://github.com/Station-House/marin-neuron-hunt.git",
+                              f"refs/heads/req/L40 {sha} refs/heads/req/L40 {gate.ZERO_SHA}\n", cwd=repo)
+    assert code == 1 and "--no-verify" in msg
+    assert gate.pre_push(None, f"(delete) {gate.ZERO_SHA} refs/heads/x {sha}\n", cwd=repo)[0] == 0
+
+
+def test_agents_cannot_answer_the_review():
+    for command in ["stationhouse design answer", "sth design answer --session x",
+                    "curl -X POST https://app.station-house.net/api/v1/design/sessions/ds_x/answers -d @a.json"]:
+        code, msg = gate.hook(json.dumps({"tool_input": {"command": command}}))
+        assert code == 2 and "contributor" in msg, command
+
+
+def test_an_experiment_push_without_a_design_document_is_blocked(repo, hunt_api):
+    git(repo, "checkout", "-qb", "results-only", "main")
+    (repo / "out").mkdir()
+    (repo / "out" / "results.jsonl").write_text("{}")
+    (repo / "out" / "summary.json").write_text("{}")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "results")
+    hunt_api.routes[("GET", "/api/v1/design/sessions")] = (200, {"sessions": [session(branch="results-only")]})
+    out = gate.check(repo)
+    assert out["outcome"] == "blocked" and "no design document" in out["message"]
+
+
+def test_undecided_classification_counts_as_an_experiment(signed_in, api):
+    api.routes[("POST", "/api/v1/design/classify")] = (503, {"error": "down"})
+    assert wizard.classify(["scripts/run.py"])["kind"] == "experiment"
+    assert wizard.classify(["x/outputs/a.parquet", "x/outputs/b.jsonl"])["method"] == "rules"
+
+
+def test_gate_events_are_queued_when_the_platform_is_down_and_sent_later(signed_in, api):
+    api.routes[("POST", "/api/v1/design/gate-events")] = (503, {"error": "down"})
+    gate._log("github:a/b", "x", "experiment", "unchecked")
+    assert gate._queue_path().exists()
+    api.routes[("POST", "/api/v1/design/gate-events")] = (201, {"ok": True})
+    gate._log("github:a/b", "x", "other", "not-experiment")
+    sent = [c["body"]["outcome"] for c in api.calls if c["path"] == "/api/v1/design/gate-events" and c["method"] == "POST"]
+    assert sent[-2:] == ["unchecked", "not-experiment"]
+    assert not gate._queue_path().exists()
+
+
+def test_design_stretch_keeps_only_the_review():
+    lines = ["unrelated work", "more unrelated", "call design_start", f"session {SID} started", "round 1", f"finalize {SID}", "later work"]
+    assert traces.design_stretch(lines, SID) == lines[2:6]
 
 
 def test_hooks_install_writes_a_pre_push_hook(repo, capsys):
@@ -234,8 +324,9 @@ def test_redact_keeps_the_conversation_and_drops_the_rest():
     ]
     text, counts = traces.redact(lines)
     assert "sk-ant" not in text and "SECRET FILE" not in text
-    assert counts["secrets"] == 1 and counts["droppedFields"] == 1 and counts["toolResultsTrimmed"] == 1
+    assert counts["secrets"] == 1 and counts["droppedFields"] == 1 and counts["toolResultsDropped"] == 1
     assert counts["toolInputsTrimmed"] == 1 and counts["unreadableLines"] == 1
+    assert "z" * 50 not in text, "tool output is dropped, not trimmed"
     assert "user: design it" in traces.preview(text)
 
 
