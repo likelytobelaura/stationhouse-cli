@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "stationhouse": {
+      "command": "uv",
+      "args": ["run", "--quiet", "--no-project", "--with", "mcp>=2.3,<3", "python", "${CLAUDE_PLUGIN_ROOT}/plugin/mcp_server.py"]
+    }
+  }
+}

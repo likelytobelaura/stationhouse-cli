@@ -1,0 +1,12 @@
+{
+  "name": "stationhouse-cli",
+  "owner": { "name": "Station House" },
+  "description": "Station House plugins for coding agents working on Station House research projects.",
+  "plugins": [
+    {
+      "name": "stationhouse",
+      "source": "./",
+      "description": "The Experimentation Wizard and push gate for Station House projects, plus the Station House skills."
+    }
+  ]
+}

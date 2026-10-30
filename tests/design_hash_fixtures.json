@@ -1,0 +1,27 @@
+[
+ {
+  "name": "plain",
+  "text": "# Claim\nModels endorse more under pressure.\n\n## Controls\nNeutral prompt.\n",
+  "sha256": "02951cb795fb7fb9e546560e6f67230bd86da33a87747c5d22cee886a2284efb"
+ },
+ {
+  "name": "crlf_and_trailing_space",
+  "text": "# Claim  \r\nModels endorse more under pressure.\r\n\r\n## Controls\t\r\nNeutral prompt.\r\n",
+  "sha256": "02951cb795fb7fb9e546560e6f67230bd86da33a87747c5d22cee886a2284efb"
+ },
+ {
+  "name": "with_marker",
+  "text": "Design-Session: ds_AbC123xyz\n# Claim\nModels endorse more under pressure.\n\n## Controls\nNeutral prompt.\n",
+  "sha256": "02951cb795fb7fb9e546560e6f67230bd86da33a87747c5d22cee886a2284efb"
+ },
+ {
+  "name": "unicode",
+  "text": "# Claim — “quotes” é ✓\nρ = 0.5\n",
+  "sha256": "4985723977ab970b2dd7df67e5a5db95b5da146058c1c709071e2bb98d2c2376"
+ },
+ {
+  "name": "leading_trailing_blank",
+  "text": "\n\n\n# Claim\nX\n\n\n",
+  "sha256": "5b961ae0dd2d2bdc3c4e693bb768801ebaff9505b4b7208f15a7ee602879fe68"
+ }
+]
